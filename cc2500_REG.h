@@ -1,11 +1,11 @@
 /***************************************************************
- *  SmartRF Studio(tm) Export
- *
- *  Radio register settings specifed with C-code
- *  compatible #define statements.
- *
- *  RF device: CC2500
- *
+    SmartRF Studio(tm) Export
+
+    Radio register settings specifed with C-code
+    compatible #define statements.
+
+    RF device: CC2500
+
  ***************************************************************/
 // configuration registers
 #define IOCFG2           0x0000  // GDO2 output pin configuration
@@ -72,17 +72,22 @@
 #define SNOP             0x003F  // No operation. May be used to get access to the chip status byte
 
 // status registers
-#define PARTNUM          0x00F0  // CC2500 part number (80 after reset)
-#define VERSION          0x00F1  // Current version number (03 after reset)
-#define FREQEST          0x00F2  // Frequency offset estimate
-#define LQI              0x00F3  // Demodulator estimate for Link Quality
-#define REG_RSSI         0x00F4  // received signal strength indication
-#define MARCSTATE        0x00F5  // Control state machine state
-#define WORTIME1         0x00F6  // High byte of WOR timer
-#define WORTIME0         0x00F7  // Low byte of WOR timer
-#define PKTSTATUS        0x00F8  // Current GDOx status and packet status
-#define VCO_VC_DAC       0x00F9  // Current setting from PLL calibration module
-#define TXBYTES          0x00FA  // Underflow and number of bytes in the TX FIFO
-#define RXBYTES          0x00FB  // Overflow and number of bytes in the RX FIFO
-#define RCCTRL1_STATUS   0x00FC  // Last RC oscillator calibration result
-#define RCCTRL0_STATUS   0x00FD  // Last RC oscillator calibration result
+#define PARTNUM          0x0030  // CC2500 part number (80 after reset)
+#define VERSION          0x0031  // Current version number (03 after reset)
+#define FREQEST          0x0032  // Frequency offset estimate
+#define LQI              0x0033  // Demodulator estimate for Link Quality
+#define REG_RSSI         0x0034  // received signal strength indication
+#define MARCSTATE        0x0035  // Control state machine state
+#define WORTIME1         0x0036  // High byte of WOR timer
+#define WORTIME0         0x0037  // Low byte of WOR timer
+#define PKTSTATUS        0x0038  // Current GDOx status and packet status
+#define VCO_VC_DAC       0x0039  // Current setting from PLL calibration module
+#define TXBYTES          0x003A  // Underflow and number of bytes in the TX FIFO
+#define RXBYTES          0x003B  // Overflow and number of bytes in the RX FIFO
+#define RCCTRL1_STATUS   0x003C  // Last RC oscillator calibration result
+#define RCCTRL0_STATUS   0x003D  // Last RC oscillator calibration result
+
+// RX and TX buffers
+#define TXFIFO           0x3F
+#define RXFIFO           0x3F
+
