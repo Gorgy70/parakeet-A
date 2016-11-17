@@ -1,11 +1,11 @@
 /***************************************************************
- *  SmartRF Studio(tm) Export
- *
- *  Radio register settings specifed with C-code
- *  compatible #define statements.
- *
- *  RF device: CC2500
- *
+    SmartRF Studio(tm) Export
+
+    Radio register settings specifed with C-code
+    compatible #define statements.
+
+    RF device: CC2500
+
  ***************************************************************/
 // configuration registers
 #define IOCFG2           0x0000  // GDO2 output pin configuration
@@ -88,6 +88,11 @@
 #define RCCTRL0_STATUS   0x003D  // Last RC oscillator calibration result
 
 // RX and TX buffers
+<<<<<<< HEAD
 #define TXFIFO           0x003F
 #define RXFIFO           0x003F
+=======
+#define TXFIFO           0x3F
+#define RXFIFO           0x3F
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
 

@@ -15,8 +15,10 @@ boolean only_listen_for_my_transmitter = true; // 1 is recommended
 unsigned long packet_received = 0;
 
 
-byte fOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
-byte defaultfOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
+byte fOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
+byte defaultfOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
+//byte fOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
+//byte defaultfOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
 unsigned long waitTimes[NUM_CHANNELS] = { 13500, 500, 500, 500 };
 unsigned long delayedWaitTimes[NUM_CHANNELS] = { 0, 700, 700, 700 };
@@ -139,6 +141,7 @@ char SendStrobe(char strobe)
 void init_CC2500(){
 
   SendStrobe(SRES);       // software reset for CC2500
+<<<<<<< HEAD
   WriteReg(IOCFG0,0x06) ;      // GD0 Asserts when sync word has been sent / received, and de-asserts at the end of the packet. In RX, the pin will de-assert
                                // when the optional address check fails or the RX FIFO overflows. In TX the pin will de-assert if the TX FIFO underflows.
   WriteReg(CHANNR,0x00);
@@ -146,17 +149,32 @@ void init_CC2500(){
   WriteReg(FREQ2,0x65);      // Frequency control word, high byte. Value from wixel project
   WriteReg(FREQ1,0x0A);      // Frequency control word, middle byte. Value from wixel project
   WriteReg(FREQ0,0xAA);      // Frequency control word, low byte. Value from wixel project
+=======
+  WriteReg(IOCFG0,0x06);
+  WriteReg(SYNC1,0xD3);
+  WriteReg(SYNC0,0x91);
   
-  WriteReg(MDMCFG4,0x4B);    // Modem Configuration. Value from wixel project
-  WriteReg(MDMCFG3,0x11);    // Modem Configuration. Value from wixel project
-  WriteReg(MDMCFG2,0x73);    // Modem Configuration. Value from wixel project
-  WriteReg(MDMCFG1,0x03);    // Modem Configuration. Value from wixel project
-  WriteReg(MDMCFG0,0x55);    // Modem Configuration. Value from wixel project
-
+//  WriteReg(PKTCTRL1,0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
+  WriteReg(PKTCTRL1,0x04);
+  WriteReg(PKTCTRL0,0x05);
+  
+  WriteReg(FSCTRL1,0x08);
+  WriteReg(FSCTRL0,0x00);
+  
+  WriteReg(FREQ2,0x5D);
+  WriteReg(FREQ1,0x44);
+  WriteReg(FREQ0,0xEB);
+  
+  WriteReg(MDMCFG4,0x4A);
+  WriteReg(MDMCFG3,0xF8);
+  WriteReg(MDMCFG2,0x73);
+  WriteReg(MDMCFG1,0x03);
+  WriteReg(MDMCFG0,0x3B);
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
+  
   WriteReg(DEVIATN,0x00);
-
-  WriteReg(FOCCFG,0x0A);     // Frequency Offset Compensation configuration. Value from wixel project
   
+<<<<<<< HEAD
   WriteReg(FSCTRL1,0x0A);    // From wixel project
   WriteReg(FSCTRL0,0x00);
 
@@ -177,32 +195,43 @@ void init_CC2500(){
   WriteReg(MCSM1,0x00);     
 //  WriteReg(MCSM2,0x07);
   WriteReg(MCSM2,0x00);
+=======
+  WriteReg(MCSM0,0x18);
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
   
-  WriteReg(AGCCTRL2,0x44);   // AGC Control. Value from wixel project
-  WriteReg(AGCCTRL1,0x00);   // AGC Control. Value from wixel project
-  WriteReg(AGCCTRL0,0xB2);   // AGC Control. Value from wixel project
+  WriteReg(FOCCFG,0x16);
   
-  WriteReg(FSCAL3,0xA9);     // Frequency Synthesizer Calibration. Value from wixel project
-  WriteReg(FSCAL2,0x0A);     // Frequency Synthesizer Calibration. Value from wixel project 
-  WriteReg(FSCAL1,0x20);     // Frequency Synthesizer Calibration. Value from wixel project
-  WriteReg(FSCAL0,0x0D);     // Frequency Synthesizer Calibration. Value from wixel project
-
-  WriteReg(TEST2,0x81);      // Value from wixel project
-  WriteReg(TEST1,0x35);      // Value from wixel project
-  WriteReg(TEST0,0x0B);      // Value from wixel project
-
-  WriteReg(SYNC1,0xD3);      // Value from wixel project
-  WriteReg(SYNC0,0x91);      // Value from wixel project
+  WriteReg(BSCFG,0x6C);
   
+<<<<<<< HEAD
 //  WriteReg(ADDR,0x09);
 
   WriteReg(FREND1,0xB6);      // Value from wixel project
   WriteReg(FREND0,0x10);      // Value from wixel project
 
   WriteReg(BSCFG,0x6C);      // Value from wixel project
+=======
+  WriteReg(AGCCTRL2,0x03);
+  WriteReg(AGCCTRL1,0x40);
+  WriteReg(AGCCTRL0,0x91);
+  
+  WriteReg(FREND1,0x56);
+  WriteReg(FREND0,0x10);
+  
+  WriteReg(FSCAL3,0xA9);
+  WriteReg(FSCAL2,0x0A);
+  WriteReg(FSCAL1,0x00);
+  WriteReg(FSCAL0,0x11);
+  
+  WriteReg(TEST2,0x88);
+  WriteReg(TEST1,0x31);
+  WriteReg(TEST0,0x0B);
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
 
+  WriteReg(MCSM0,0x14);    // Auto-calibrate when going from idle to RX or TX.
+  WriteReg(MCSM1,0x00);    // Disable CCA.  After RX, go to IDLE.  After TX, go to IDLE.
 }
-
+  
 char ReadReg(char addr){
   addr = addr + 0x80;
   digitalWrite(SS,LOW);
@@ -223,7 +252,11 @@ char ReadStatus(char addr){
   SPI.transfer(addr);
   char y = SPI.transfer(0);
   digitalWrite(SS,HIGH);
+<<<<<<< HEAD
   delay(10);
+=======
+//  delay(10);
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
   return y;  
 }
 
@@ -245,6 +278,7 @@ void setup() {
 #ifdef DEBUG
   Serial.println("CC250 init start ....");
 #endif  
+
   init_CC2500();  // initialise CC2500 registers
 //  WriteReg(MCSM1, 0);
 #ifdef DEBUG
@@ -260,10 +294,9 @@ void setup() {
   Serial.print("State: ");
   Serial.println(i,HEX);
 #endif  
-  memset (&Pkt, 0, sizeof (Dexcom_packet));
 
+  memset (&Pkt, 0, sizeof (Dexcom_packet));
   dex_tx_id= asciiToDexcomSrc(transmitter_id);
-  
 }
 
 unsigned long delayFor(int wait_chan) {
@@ -290,6 +323,13 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
    WriteReg(FSCTRL0,newFSCTRL0);
    WriteReg(CHANNR,channel);
    SendStrobe(SRX);  //RX
+/*   
+#ifdef DEBUG
+   byte i = ReadStatus(MARCSTATE);
+   Serial.print("State: ");
+   Serial.println(i,HEX);
+#endif  
+*/
 }
 
 void strobe_radio(int radio_chan) {
@@ -299,6 +339,16 @@ void strobe_radio(int radio_chan) {
     swap_channel(nChannels[radio_chan], fOffset[radio_chan]);
 }
 
+<<<<<<< HEAD
+void strobe_radio(int radio_chan) {
+    init_CC2500();
+//    WriteReg(MCSM1, 0);
+//    radioMacStrobe();
+    swap_channel(nChannels[radio_chan], fOffset[radio_chan]);
+}
+
+=======
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
 void ReadRadioBuffer(Dexcom_packet * pkt) {
   char buffer[128];
   byte len;
@@ -375,11 +425,16 @@ boolean WaitForPacket(unsigned int milliseconds, Dexcom_packet * pkt, byte chann
 //      if(millis() - start > six_minutes) {
 //        break;
 //      }
+<<<<<<< HEAD
+=======
+      rxbytes = 0;
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
       while (digitalRead(GDO0_PIN) == HIGH) {
         packet_on_board = true;
 #ifdef DEBUG
          Serial.println("Receiving data ........");     
 #endif   
+<<<<<<< HEAD
          rxbytes = ReadStatus(RXBYTES);
          if (rxbytes == 0) {
           rxbytes = 64;
@@ -414,11 +469,18 @@ boolean WaitForPacket(unsigned int milliseconds, Dexcom_packet * pkt, byte chann
 */         
          packet_received++; 
          fOffset[channel] += ReadStatus(FREQEST);
+=======
+      }
+      if (packet_on_board) {
+         rxbytes = ReadStatus(RXBYTES);
+         packet_received++; 
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
 #ifdef DEBUG
          Serial.print("Packet # "); 
          Serial.println(packet_received);     
          Serial.print("Bytes received: ");
          Serial.println(rxbytes);     
+<<<<<<< HEAD
          for (i = 0; i < data_index; i++) {
           if (data[i] < 16) {
             Serial.print("0");
@@ -427,12 +489,56 @@ boolean WaitForPacket(unsigned int milliseconds, Dexcom_packet * pkt, byte chann
          }
          Serial.println(" END");
          delay(500);
+=======
+#endif   
+         if (rxbytes == 0 || rxbytes > 64) {
+#ifdef DEBUG
+           Serial.println("Bad packet");     
+#endif   
+           break;
+         }
+         i = ReadReg(RXFIFO);
+/*         
+#ifdef DEBUG
+         Serial.print("Len: ");
+         Serial.println(i);     
+#endif   
+*/
+//         ReadRxBuffers(rxbytes);
+         for (i = data_index; i < rxbytes-1; i++) {
+          if (data_index < 200) {
+            data[data_index] = ReadReg(RXFIFO);
+            data_index++;  
+          }
+         }
+         
+//         fOffset[channel] += ReadStatus(FREQEST);
+         fOffset[channel] = ReadStatus(FREQEST);
+#ifdef DEBUG
+         for (i = 0; i < data_index; i++) {
+           if (i < 3 || i > 15) {
+             if ((byte)data[i] < 16) {
+               Serial.print("0");
+             }
+             Serial.print((byte)data[i],HEX);
+           }
+           else {  
+             Serial.print(data[i]);
+           } 
+          }
+         Serial.println(" END");
+/*         
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
          i = ReadStatus(MARCSTATE);
          Serial.print("State: ");
          Serial.println(i,HEX);
          i = ReadReg(CHANNR);
          Serial.print("Chanel: ");
          Serial.println(i);
+<<<<<<< HEAD
+=======
+*/         
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
 #endif   
 //         ReadRadioBuffer(pkt);
 //         break;   
@@ -457,13 +563,16 @@ boolean get_packet (Dexcom_packet * pPkt) {
 //    if (WaitForPacket (100, pPkt, nChannel)) {
 //      needsTimingCalibration = 0;
       sequential_missed_packets = 0;
-      delay(2000);
       SendStrobe(SIDLE);
       SendStrobe(SFRX);
       return true;
     } else
     {
       SendStrobe(SIDLE);
+<<<<<<< HEAD
+=======
+      SendStrobe(SFRX);
+>>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
       continue;
     }
    
