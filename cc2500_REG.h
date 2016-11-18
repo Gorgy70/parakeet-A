@@ -88,11 +88,6 @@
 #define RCCTRL0_STATUS   0x003D  // Last RC oscillator calibration result
 
 // RX and TX buffers
-<<<<<<< HEAD
-#define TXFIFO           0x003F
-#define RXFIFO           0x003F
-=======
 #define TXFIFO           0x3F
 #define RXFIFO           0x3F
->>>>>>> da87a415b93318a22e2884af70fe0dc2758bfb31
 
