@@ -7,7 +7,7 @@
 
 #define GDO0_PIN 2            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
-#define FIVE_MINUTE 5*60*1000;
+#define FIVE_MINUTE 300000    // 5 минут
 
 #define my_webservice_url  "http://parakeet.esen.ru/receiver.cgi"
 #define my_webservice_reply     "!ACK"
@@ -16,7 +16,8 @@
 #define my_password_code  "12354"
 
 unsigned long dex_tx_id;
-char transmitter_id[] = "ABCDE";
+//char transmitter_id[] = "ABCDE";
+char transmitter_id[] = "6518Y";
 
 unsigned long packet_received = 0;
 
@@ -140,8 +141,15 @@ void loadSettingsFromFlash()
 {
   EEPROM.get(0, settings);
   if (settings.checksum != checksum_settings()) {
+#ifdef DEBUG
+    Serial.println("Settings checksum error. Load defaults");
+#endif
     clearSettings();
   }
+#ifdef DEBUG
+  Serial.print("Dexcom ID: ");
+  Serial.println(settings.dex_tx_id);
+#endif
 }
 
 void blink_builtin_led_quarter() {  // Blink quarter seconds
@@ -339,7 +347,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
     if (milliseconds_wait != 0 && current_time - start_time > milliseconds_wait) {
       break; // Если превысыли время ожидания на канале - выход
     }
-    if (next_time != 0 && next_time + 10 < current_time) {
+    if (next_time != 0 && next_time + 300 < current_time) {
       break; // Если превысыли время следующего пакета на канале 0 - выход
     }
     blink_builtin_led_quarter();
@@ -402,9 +410,7 @@ boolean get_packet (void) {
   }
   else {
     sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
-    if (next_time == 0) {
-      next_time = catch_time; // Пойман первый пакет
-    }
+    next_time = catch_time; 
   }
 
   if (next_time != 0) {
@@ -449,8 +455,30 @@ void print_packet() {
 }
 
 void loop() {
+  unsigned long current_time;
+  
   if (next_time != 0) {
-    delay(next_time - millis() - 1000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+#ifdef DEBUG
+    Serial.print("next_time - ");
+    Serial.print(next_time);
+    Serial.print(" current_time - ");
+    Serial.print(millis());
+    Serial.print(" interval - ");
+    Serial.println(next_time - millis() - 3000);
+#endif
+    current_time = millis();
+    if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
+      delay(next_time - current_time - 10000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+#ifdef DEBUG
+      Serial.println("WakeUp");
+#endif
+    }
+    else {
+#ifdef DEBUG
+      Serial.println("Timer overflow");
+#endif
+      next_time = 0;
+    }
   }
   if (get_packet ())
   {
