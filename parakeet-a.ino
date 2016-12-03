@@ -27,8 +27,8 @@ byte defaultfOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
 //byte defaultfOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
 //unsigned long waitTimes[NUM_CHANNELS] = { 13500, 500, 500, 500 };
-unsigned long waitTimes[NUM_CHANNELS] = { 0, 500, 500, 500 };
-//unsigned long waitTimes[NUM_CHANNELS] = { 0, 550, 550, 550 };
+//unsigned long waitTimes[NUM_CHANNELS] = { 0, 500, 500, 500 };
+unsigned long waitTimes[NUM_CHANNELS] = { 0, 600, 600, 600 };
 unsigned long catch_offsets[NUM_CHANNELS] = { 0, 0, 0, 0 };
 
 byte sequential_missed_packets = 0;
@@ -423,7 +423,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 #endif
         catch_time = current_time - 500 * channel_index; // Приводим к каналу 0
         nRet = true;
-      }
+      } 
       if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
 #ifdef DEBUG
         Serial.print("Chanel = 0. Second try.");
