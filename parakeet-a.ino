@@ -108,6 +108,48 @@ unsigned long asciiToDexcomSrc(char addr[6]) {
   return src;
 }
 
+byte bit_reverse_byte (byte in)
+{
+    byte bRet = 0;
+    if (in & 0x01)
+        bRet |= 0x80;
+    if (in & 0x02)
+        bRet |= 0x40;
+    if (in & 0x04)
+        bRet |= 0x20;
+    if (in & 0x08)
+        bRet |= 0x10;
+    if (in & 0x10)
+        bRet |= 0x08;
+    if (in & 0x20)
+        bRet |= 0x04;
+    if (in & 0x40)
+        bRet |= 0x02;
+    if (in & 0x80)
+        bRet |= 0x01;
+    return bRet;
+}
+
+void bit_reverse_bytes (byte * buf, byte nLen)
+{
+    byte i = 0;
+    for (; i < nLen; i++)
+    {
+        buf[i] = bit_reverse_byte (buf[i]);
+    }
+}
+
+unsigned long dex_num_decoder (unsigned int usShortFloat)
+{
+    unsigned int usReversed = usShortFloat;
+    byte usExponent = 0;
+    unsigned long usMantissa = 0;
+    bit_reverse_bytes ((byte *) & usReversed, 2);
+    usExponent = ((usReversed & 0xE000) >> 13);
+    usMantissa = (usReversed & 0x1FFF);
+    return usMantissa << usExponent;
+}
+
 void clearSettings()
 {
   memset (&settings, 0, sizeof (settings));
@@ -452,9 +494,9 @@ void print_packet() {
   Serial.print("\t");
   Serial.print(Pkt.txId, HEX);
   Serial.print("\t");
-  Serial.print(Pkt.raw, HEX);
+  Serial.print(dex_num_decoder(Pkt.raw));
   Serial.print("\t");
-  Serial.print(Pkt.filtered, HEX);
+  Serial.print(dex_num_decoder(Pkt.filtered)*2);
   Serial.print("\t");
   Serial.print(Pkt.battery, HEX);
   Serial.print("\t");
