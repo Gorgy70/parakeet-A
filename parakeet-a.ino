@@ -2,39 +2,40 @@
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
+#include <EEPROM.h>
 #include "cc2500_REG.h"
 
-#define GDO0_PIN 2
+#define GDO0_PIN 2            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
-#define RADIO_MAX_PACKET_SIZE  19
+#define FIVE_MINUTE 300000    // 5 минут
+
+#define my_webservice_url  "http://parakeet.esen.ru/receiver.cgi"
+#define my_webservice_reply     "!ACK"
+#define my_user_agent     "parakeet_A"
+#define my_gprs_apn   "internet.mts.ru"
+#define my_password_code  "12354"
 
 unsigned long dex_tx_id;
-char transmitter_id[] = "ABCDE";
-boolean only_listen_for_my_transmitter = true; // 1 is recommended    
+//char transmitter_id[] = "ABCDE";
+char transmitter_id[] = "6518Y";
 
 unsigned long packet_received = 0;
-
 
 byte fOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
 byte defaultfOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
 //byte fOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
 //byte defaultfOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
-unsigned long waitTimes[NUM_CHANNELS] = { 13500, 500, 500, 500 };
-unsigned long delayedWaitTimes[NUM_CHANNELS] = { 0, 700, 700, 700 };
+//unsigned long waitTimes[NUM_CHANNELS] = { 13500, 500, 500, 500 };
+unsigned long waitTimes[NUM_CHANNELS] = { 0, 500, 500, 500 };
+//unsigned long waitTimes[NUM_CHANNELS] = { 0, 550, 550, 550 };
 unsigned long catch_offsets[NUM_CHANNELS] = { 0, 0, 0, 0 };
-byte last_catch_channel = 0;
-boolean needsTimingCalibration = true;
-byte sequential_missed_packets = 0;
 
-//                                                                                                  //
-//                 Advanced Options, dont change unless you know what you are doing                 //
-//                                                                                                  //
-//                                                                                                  //
-byte wake_earlier_for_next_miss = 20;
-// if a packet is missed, wake this many seconds earlier to try and get the next one                //
-// shorter means better bettery life but more likely to miss multiple packets in a row              //
-//                                                                                                  //
+byte sequential_missed_packets = 0;
+byte wait_after_time = 100;
+unsigned long next_time = 0; // Время ожидания следующего пакета на канале 0
+unsigned long catch_time = 0; // Время последнего пойманного пакета (приведенное к пакету на канале 0)
+
 byte misses_until_failure = 2;                                                   //
 // after how many missed packets should we just start a nonstop scan?                               //
 // a high value is better for conserving batter life if you go out of wixel range a lot             //
@@ -43,63 +44,119 @@ byte misses_until_failure = 2;                                                  
 
 typedef struct _Dexcom_packet
 {
-    byte len;
-    unsigned long dest_addr;
-    unsigned long src_addr;
-    byte port;
-    byte device_info;
-    byte txId;
-    unsigned int raw;
-    unsigned int filtered;
-    byte battery;
-    byte unknown;
-    byte checksum;
-    byte RSSI;
-    byte LQI2;
+  byte len;
+  unsigned long dest_addr;
+  unsigned long src_addr;
+  byte port;
+  byte device_info;
+  byte txId;
+  unsigned int raw;
+  unsigned int filtered;
+  byte battery;
+  byte unknown;
+  byte checksum;
+  byte RSSI;
+  byte LQI2;
 } Dexcom_packet;
 
 Dexcom_packet Pkt;
 
-char data[200];
-byte data_index;
+typedef struct _parakeet_settings
+{
+  unsigned long dex_tx_id;     //4 bytes
+  char http_url[56];
+  char gsm_apn[32];
+  char password_code[6];
+  unsigned long checksum; // needs to be aligned
+
+} parakeet_settings;
+
+parakeet_settings settings;
 
 char SrcNameTable[32] = { '0', '1', '2', '3', '4', '5', '6', '7',
                           '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
                           'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P',
-                          'Q', 'R', 'S', 'T', 'U', 'W', 'X', 'Y' };
+                          'Q', 'R', 'S', 'T', 'U', 'W', 'X', 'Y'
+                        };
 
 
 void dexcom_src_to_ascii(unsigned long src, char addr[6]) {
-    addr[0] = SrcNameTable[(src >> 20) & 0x1F];
-    addr[1] = SrcNameTable[(src >> 15) & 0x1F];
-    addr[2] = SrcNameTable[(src >> 10) & 0x1F];
-    addr[3] = SrcNameTable[(src >> 5) & 0x1F];
-    addr[4] = SrcNameTable[(src >> 0) & 0x1F];
-    addr[5] = 0;
+  addr[0] = SrcNameTable[(src >> 20) & 0x1F];
+  addr[1] = SrcNameTable[(src >> 15) & 0x1F];
+  addr[2] = SrcNameTable[(src >> 10) & 0x1F];
+  addr[3] = SrcNameTable[(src >> 5) & 0x1F];
+  addr[4] = SrcNameTable[(src >> 0) & 0x1F];
+  addr[5] = 0;
 }
 
 
 unsigned long getSrcValue(char srcVal) {
-    byte i = 0;
-    for(i = 0; i < 32; i++) {
-        if (SrcNameTable[i]==srcVal) break;
-    }
-    return i & 0xFF;
+  byte i = 0;
+  for (i = 0; i < 32; i++) {
+    if (SrcNameTable[i] == srcVal) break;
+  }
+  return i & 0xFF;
 }
 
 unsigned long asciiToDexcomSrc(char addr[6]) {
-    unsigned long src = 0;
-    src |= (getSrcValue(addr[0]) << 20);
-    src |= (getSrcValue(addr[1]) << 15);
-    src |= (getSrcValue(addr[2]) << 10);
-    src |= (getSrcValue(addr[3]) << 5);
-    src |= getSrcValue(addr[4]);
-    return src;
+  unsigned long src = 0;
+  src |= (getSrcValue(addr[0]) << 20);
+  src |= (getSrcValue(addr[1]) << 15);
+  src |= (getSrcValue(addr[2]) << 10);
+  src |= (getSrcValue(addr[3]) << 5);
+  src |= getSrcValue(addr[4]);
+  return src;
+}
+
+void clearSettings()
+{
+  memset (&settings, 0, sizeof (settings));
+  settings.dex_tx_id = asciiToDexcomSrc (transmitter_id);
+  dex_tx_id = settings.dex_tx_id;
+  sprintf(settings.http_url, my_webservice_url);
+  sprintf(settings.gsm_apn, my_gprs_apn);
+  sprintf(settings.password_code, my_password_code);
+}
+
+unsigned long checksum_settings()
+{
+  char* flash_pointer;
+  unsigned long chk = 0x12345678;
+  byte i;
+  //   flash_pointer = (char*)settings;
+  flash_pointer = (char*)&settings;
+  for (i = 0; i < sizeof(parakeet_settings) - 4; i++)
+  {
+    chk += (flash_pointer[i] * (i + 1));
+    chk++;
+  }
+  return chk;
+}
+
+void saveSettingsToFlash()
+{
+  settings.checksum = checksum_settings();
+  EEPROM.put(0, settings);
+}
+
+void loadSettingsFromFlash()
+{
+  EEPROM.get(0, settings);
+  if (settings.checksum != checksum_settings()) {
+#ifdef DEBUG
+    Serial.println("Settings checksum error. Load defaults");
+#endif
+    clearSettings();
+  }
+#ifdef DEBUG
+  Serial.print("Dexcom ID: ");
+  Serial.println(settings.dex_tx_id);
+#endif
 }
 
 void blink_builtin_led_quarter() {  // Blink quarter seconds
-  if ((millis()/250) % 2) {
-    digitalWrite(LED_BUILTIN, HIGH);    
+  if ((millis() / 250) % 2) {
+    digitalWrite(LED_BUILTIN, HIGH);
   } else
   {
     digitalWrite(LED_BUILTIN, LOW);
@@ -107,388 +164,340 @@ void blink_builtin_led_quarter() {  // Blink quarter seconds
 }
 
 void blink_builtin_led_half() {  // Blink half seconds
-  if ((millis()/500) % 2) {
-    digitalWrite(LED_BUILTIN, HIGH);    
+  if ((millis() / 500) % 2) {
+    digitalWrite(LED_BUILTIN, HIGH);
   } else
   {
     digitalWrite(LED_BUILTIN, LOW);
   }
 }
 
-void WriteReg(char addr, char value){
-  digitalWrite(SS,LOW);
+void WriteReg(char addr, char value) {
+  digitalWrite(SS, LOW);
   while (digitalRead(MISO) == HIGH) {
   };
   SPI.transfer(addr);
   SPI.transfer(value);
-  digitalWrite(SS,HIGH);
-  delay(10);
+  digitalWrite(SS, HIGH);
+  //  delay(10);
 }
 
 char SendStrobe(char strobe)
 {
-  digitalWrite(SS,LOW);
-  
+  digitalWrite(SS, LOW);
+
   while (digitalRead(MISO) == HIGH) {
   };
-    
+
   char result =  SPI.transfer(strobe);
-  digitalWrite(SS,HIGH);
-  delay(10);
+  digitalWrite(SS, HIGH);
+  //  delay(10);
   return result;
 }
 
-void init_CC2500(){
+void init_CC2500() {
 
   SendStrobe(SRES);       // software reset for CC2500
-  WriteReg(IOCFG0,0x06);
-  WriteReg(SYNC1,0xD3);
-  WriteReg(SYNC0,0x91);
-  
-//  WriteReg(PKTCTRL1,0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
-  WriteReg(PKTCTRL1,0x04);
-  WriteReg(PKTCTRL0,0x05);
-  
-  WriteReg(FSCTRL1,0x08);
-  WriteReg(FSCTRL0,0x00);
-  
-  WriteReg(FREQ2,0x5D);
-  WriteReg(FREQ1,0x44);
-  WriteReg(FREQ0,0xEB);
-  
-  WriteReg(MDMCFG4,0x4A);
-  WriteReg(MDMCFG3,0xF8);
-  WriteReg(MDMCFG2,0x73);
-  WriteReg(MDMCFG1,0x03);
-  WriteReg(MDMCFG0,0x3B);
-  
-  WriteReg(DEVIATN,0x00);
-  
-  WriteReg(MCSM0,0x18);
-  
-  WriteReg(FOCCFG,0x16);
-  
-  WriteReg(BSCFG,0x6C);
-  
-  WriteReg(AGCCTRL2,0x03);
-  WriteReg(AGCCTRL1,0x40);
-  WriteReg(AGCCTRL0,0x91);
-  
-  WriteReg(FREND1,0x56);
-  WriteReg(FREND0,0x10);
-  
-  WriteReg(FSCAL3,0xA9);
-  WriteReg(FSCAL2,0x0A);
-  WriteReg(FSCAL1,0x00);
-  WriteReg(FSCAL0,0x11);
-  
-  WriteReg(TEST2,0x88);
-  WriteReg(TEST1,0x31);
-  WriteReg(TEST0,0x0B);
+  WriteReg(IOCFG0, 0x06);
+  WriteReg(SYNC1, 0xD3);
+  WriteReg(SYNC0, 0x91);
 
-  WriteReg(MCSM0,0x14);    // Auto-calibrate when going from idle to RX or TX.
-  WriteReg(MCSM1,0x00);    // Disable CCA.  After RX, go to IDLE.  After TX, go to IDLE.
+  WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
+  //  WriteReg(PKTCTRL1,0x04);
+  WriteReg(PKTCTRL0, 0x05);
+
+  WriteReg(FSCTRL1, 0x08);
+  WriteReg(FSCTRL0, 0x00);
+
+  WriteReg(FREQ2, 0x5D);
+  WriteReg(FREQ1, 0x44);
+  WriteReg(FREQ0, 0xEB);
+
+  WriteReg(MDMCFG4, 0x4A);
+  WriteReg(MDMCFG3, 0xF8);
+  WriteReg(MDMCFG2, 0x73);
+  WriteReg(MDMCFG1, 0x03);
+  WriteReg(MDMCFG0, 0x3B);
+
+  WriteReg(DEVIATN, 0x00);
+
+  WriteReg(MCSM0, 0x18);
+
+  WriteReg(FOCCFG, 0x16);
+
+  WriteReg(BSCFG, 0x6C);
+
+  WriteReg(AGCCTRL2, 0x03);
+  WriteReg(AGCCTRL1, 0x40);
+  WriteReg(AGCCTRL0, 0x91);
+
+  WriteReg(FREND1, 0x56);
+  WriteReg(FREND0, 0x10);
+
+  WriteReg(FSCAL3, 0xA9);
+  WriteReg(FSCAL2, 0x0A);
+  WriteReg(FSCAL1, 0x00);
+  WriteReg(FSCAL0, 0x11);
+
+  WriteReg(TEST2, 0x88);
+  WriteReg(TEST1, 0x31);
+  WriteReg(TEST0, 0x0B);
+
+  WriteReg(MCSM0, 0x14);   // Auto-calibrate when going from idle to RX or TX.
+  WriteReg(MCSM1, 0x00);   // Disable CCA.  After RX, go to IDLE.  After TX, go to IDLE.
 }
-  
-char ReadReg(char addr){
+
+char ReadReg(char addr) {
   addr = addr + 0x80;
-  digitalWrite(SS,LOW);
+  digitalWrite(SS, LOW);
   while (digitalRead(MISO) == HIGH) {
   };
   SPI.transfer(addr);
   char y = SPI.transfer(0);
-  digitalWrite(SS,HIGH);
-//  delay(10);
-  return y;  
+  digitalWrite(SS, HIGH);
+  //  delay(10);
+  return y;
 }
 
-char ReadStatus(char addr){
+char ReadStatus(char addr) {
   addr = addr + 0xC0;
-  digitalWrite(SS,LOW);
+  digitalWrite(SS, LOW);
   while (digitalRead(MISO) == HIGH) {
   };
   SPI.transfer(addr);
   char y = SPI.transfer(0);
-  digitalWrite(SS,HIGH);
-//  delay(10);
-  return y;  
+  digitalWrite(SS, HIGH);
+  //  delay(10);
+  return y;
 }
 
 void setup() {
-  // put your setup code here, to run once:
   pinMode(GDO0_PIN, INPUT);
 #ifdef DEBUG
   Serial.begin(9600);
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
   }
-#endif  
+#endif
   // initialize digital pin LED_BUILTIN as an output.
   pinMode(LED_BUILTIN, OUTPUT);
 
   SPI.begin();
-//  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
-  digitalWrite(SS,HIGH);
-#ifdef DEBUG
-  Serial.println("CC250 init start ....");
-#endif  
+  //  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
+  digitalWrite(SS, HIGH);
 
   init_CC2500();  // initialise CC2500 registers
-#ifdef DEBUG
-  Serial.println("CC250 init OK");
-  byte i;
-  i = ReadStatus(PARTNUM);
-  Serial.print("Part Number: ");
-  Serial.println(i);
-  i = ReadStatus(VERSION);
-  Serial.print("Version Number: ");
-  Serial.println(i);
-  i = ReadStatus(MARCSTATE);
-  Serial.print("State: ");
-  Serial.println(i,HEX);
-#endif  
-
-  memset (&Pkt, 0, sizeof (Dexcom_packet));
-  dex_tx_id= asciiToDexcomSrc(transmitter_id);
-}
-
-unsigned long delayFor(int wait_chan) {
-    if(needsTimingCalibration) {
-        return delayedWaitTimes[wait_chan];
-    }
-    if(!wait_chan && sequential_missed_packets) {
-        return waitTimes[wait_chan] + (sequential_missed_packets * wake_earlier_for_next_miss * 2 * 1000);
-    } else {
-        return waitTimes[wait_chan];
-    }
+  loadSettingsFromFlash();
 }
 
 void reset_offsets() {
-    int i;
-    for(i=0; i<4; i++) {
-        fOffset[i] = defaultfOffset[i];
-    }
+  int i;
+  for (i = 0; i < 4; i++) {
+    fOffset[i] = defaultfOffset[i];
+  }
 }
 
 void swap_channel(unsigned long channel, byte newFSCTRL0) {
-   
-   SendStrobe(SIDLE);
-   WriteReg(FSCTRL0,newFSCTRL0);
-   WriteReg(CHANNR,channel);
-   SendStrobe(SRX);  //RX
-/*   
-#ifdef DEBUG
-   byte i = ReadStatus(MARCSTATE);
-   Serial.print("State: ");
-   Serial.println(i,HEX);
-#endif  
-*/
+
+  SendStrobe(SIDLE);
+  //   WriteReg(FSCTRL0,newFSCTRL0);
+  WriteReg(CHANNR, channel);
+  SendStrobe(SRX);  //RX
+  while (ReadStatus(MARCSTATE) != 0x0d) {
+    // Подождем пока включится режим приема
+  }
 }
 
-void strobe_radio(int radio_chan) {
-    init_CC2500();
-//    WriteReg(MCSM1, 0);
-//    radioMacStrobe();
-    swap_channel(nChannels[radio_chan], fOffset[radio_chan]);
-}
-
-void ReadRadioBuffer(Dexcom_packet * pkt) {
-  char buffer[128];
+void ReadRadioBuffer() {
+  char buffer[64];
   byte len;
   byte i;
   byte rxbytes;
-  
-  len = ReadReg(RXFIFO);
+
+  memset (&buffer, 0, sizeof (Dexcom_packet));
+  len = ReadStatus(RXBYTES);
 #ifdef DEBUG
   Serial.print("Bytes in buffer: ");
   Serial.println(len);
-#endif   
-  buffer[0] = len;
-  for (i = 1; i <= len; i++) {
-    if (i > 64) {
-      break;
+#endif
+  if (len > 0 && len < 65) {
+    for (i = 0; i < len; i++) {
+      if (i < sizeof (Dexcom_packet)) {
+        buffer[i] = ReadReg(RXFIFO);
+      }
     }
-    buffer[i] = ReadReg(RXFIFO);
-#ifdef DEBUG
-    rxbytes = ReadStatus(RXBYTES);
-    Serial.print("Bytes in FIFO: ");
-    Serial.println(rxbytes);
-#endif   
   }
-  memcpy(pkt,buffer,sizeof(Dexcom_packet));
+  memcpy(&Pkt, &buffer, sizeof (Dexcom_packet));
 #ifdef DEBUG
   Serial.print("Dexcom ID: ");
-  Serial.println(pkt->src_addr);
-  for (i = 0; i <= len; i++) {
-    if (i > 64) {
+  Serial.println(Pkt.src_addr);
+#endif
+}
+
+boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
+{
+  unsigned long start_time;
+  unsigned long current_time;
+  boolean nRet = false;
+  boolean packet_on_board;
+
+  start_time = millis();
+  swap_channel(nChannels[channel_index], fOffset[channel_index]);
+
+#ifdef DEBUG
+  Serial.print("Chanel = ");
+  Serial.print(nChannels[channel_index]);
+  Serial.print(" Time = ");
+  Serial.println(start_time);
+#endif
+  while (true) {
+    current_time = millis();
+    if (milliseconds_wait != 0 && current_time - start_time > milliseconds_wait) {
+      break; // Если превысыли время ожидания на канале - выход
+    }
+    if (channel_index == 0 && next_time != 0 && current_time > next_time + wait_after_time) {
+      break; // Если превысыли время следующего пакета на канале 0 - выход
+    }
+    blink_builtin_led_quarter();
+    packet_on_board = false;
+    while (digitalRead(GDO0_PIN) == HIGH) {
+      packet_on_board = true;
+      // Идет прием пакета
+    }
+    if (packet_on_board) {
+      fOffset[channel_index] = ReadStatus(FREQEST);
+      ReadRadioBuffer();
+      if (Pkt.src_addr == dex_tx_id) {
+#ifdef DEBUG
+        Serial.print("Packet catched. Chanel = ");
+        Serial.print(nChannels[channel_index]);
+        Serial.print(" Interval = ");
+        if (catch_time != 0) {
+          Serial.println(current_time - 500 * channel_index - catch_time);
+        }
+        else {
+          Serial.println("unknown");
+        }
+#endif
+        catch_time = current_time - 500 * channel_index; // Приводим к каналу 0
+        nRet = true;
+      }
+      if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
+#ifdef DEBUG
+        Serial.print("Chanel = 0. Second try.");
+        Serial.print(nChannels[channel_index]);
+        Serial.print(" Time = ");
+        Serial.println(current_time);
+#endif
+        swap_channel(nChannels[channel_index], fOffset[channel_index]);
+      }
+      else {
+        break;
+      }
+    }
+  }
+
+  digitalWrite(LED_BUILTIN, LOW);
+  return nRet;
+}
+
+boolean get_packet (void) {
+  byte nChannel;
+  boolean nRet;
+
+  nRet = false;
+  for (nChannel = 0; nChannel < NUM_CHANNELS; nChannel++)
+  {
+    if (WaitForPacket (waitTimes[nChannel], nChannel)) {
+      nRet = true;
       break;
     }
-    Serial.print(buffer[i]);
   }
-#endif   
-}
-
-void ReadRxBuffers(byte len) {
-  digitalWrite(SS,LOW);
-  while (digitalRead(MISO) == HIGH) {
-  };
-  SPI.transfer(0xFF);
-  for (int i = 0; i < len; i++) {
-    if (data_index < 200) {
-      data[data_index] = SPI.transfer(0);
-      data_index++;
-    }  
-  }  
-  digitalWrite(SS,HIGH);
-}
-    
-boolean WaitForPacket(unsigned int milliseconds, Dexcom_packet * pkt, byte channel)
-{
-    unsigned long start = millis();
-    unsigned long six_minutes = 360000;
-    boolean nRet = false;
-    byte rxbytes;
-    unsigned long i1 = 0;
-    byte i;
-    boolean packet_on_board;
-    
-    swap_channel(nChannels[channel], fOffset[channel]);
-
-    while (!milliseconds || (millis() - start) < milliseconds) {
-      blink_builtin_led_quarter();
-      packet_on_board = false;
-      data_index = 0;
-      i1++;
-//      if(!(i1 % 40000)) {
-//          strobe_radio(channel);
-//#ifdef DEBUG
-//          Serial.println("Strobe radio .....");     
-//#endif   
-//      }
-//      if(millis() - start > six_minutes) {
-//        break;
-//      }
-      rxbytes = 0;
-      while (digitalRead(GDO0_PIN) == HIGH) {
-        packet_on_board = true;
+  if (!nRet) {
+    sequential_missed_packets++;
 #ifdef DEBUG
-         Serial.println("Receiving data ........");     
-#endif   
-      }
-      if (packet_on_board) {
-         rxbytes = ReadStatus(RXBYTES);
-         packet_received++; 
-#ifdef DEBUG
-         Serial.print("Packet # "); 
-         Serial.println(packet_received);     
-         Serial.print("Bytes received: ");
-         Serial.println(rxbytes);     
-#endif   
-         if (rxbytes == 0 || rxbytes > 64) {
-#ifdef DEBUG
-           Serial.println("Bad packet");     
-#endif   
-           break;
-         }
-         i = ReadReg(RXFIFO);
-/*         
-#ifdef DEBUG
-         Serial.print("Len: ");
-         Serial.println(i);     
-#endif   
-*/
-//         ReadRxBuffers(rxbytes);
-         for (i = data_index; i < rxbytes-1; i++) {
-          if (data_index < 200) {
-            data[data_index] = ReadReg(RXFIFO);
-            data_index++;  
-          }
-         }
-         
-//         fOffset[channel] += ReadStatus(FREQEST);
-         fOffset[channel] = ReadStatus(FREQEST);
-#ifdef DEBUG
-         for (i = 0; i < data_index; i++) {
-           if (i < 3 || i > 15) {
-             if ((byte)data[i] < 16) {
-               Serial.print("0");
-             }
-             Serial.print((byte)data[i],HEX);
-           }
-           else {  
-             Serial.print(data[i]);
-           } 
-          }
-         Serial.println(" END");
-/*         
-         i = ReadStatus(MARCSTATE);
-         Serial.print("State: ");
-         Serial.println(i,HEX);
-         i = ReadReg(CHANNR);
-         Serial.print("Chanel: ");
-         Serial.println(i);
-*/         
-#endif   
-//         ReadRadioBuffer(pkt);
-//         break;   
-         return true;
-      }
-//      delay(500);
-    }
-    
-    digitalWrite(LED_BUILTIN, LOW);
-    return nRet;
-}
-boolean get_packet (Dexcom_packet * pPkt) {
-  int nChannel = 0;
-  for (nChannel = 0; nChannel < NUM_CHANNELS; nChannel++)
-//  for (nChannel = 0; nChannel < 250; nChannel++)
-  {
-#ifdef DEBUG
-    Serial.print("Listen chanel: ");
-    Serial.println(nChannels[nChannel]);
+    Serial.print("Packet missed - ");
+    Serial.println(sequential_missed_packets);
 #endif
-    if (WaitForPacket (delayFor(nChannel), pPkt, nChannel)) {
-//    if (WaitForPacket (100, pPkt, nChannel)) {
-//      needsTimingCalibration = 0;
-      sequential_missed_packets = 0;
-      SendStrobe(SIDLE);
-      SendStrobe(SFRX);
-      return true;
-    } else
-    {
-      SendStrobe(SIDLE);
-      SendStrobe(SFRX);
-      continue;
+    if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
+      next_time = 0;
     }
-   
   }
-  sequential_missed_packets ++;
-  if(sequential_missed_packets > misses_until_failure) {
-      sequential_missed_packets = 0;
-      needsTimingCalibration = 1;
+  else {
+    sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
+    next_time = catch_time; 
   }
-  reset_offsets();
-  last_catch_channel = 0;
-//  SendStrobe(SIDLE);
-  
-  return false;
+
+  if (next_time != 0) {
+    next_time += FIVE_MINUTE;
+  }
+  SendStrobe(SIDLE);
+  SendStrobe(SFRX);
+
+  return nRet;
 }
 
-void print_packet(Dexcom_packet * pPkt) {
+void print_packet() {
   byte i;
 #ifdef DEBUG
-  Serial.println("print_packet start .....");
-  i = ReadStatus(MARCSTATE);
-  Serial.print("State: ");
-  Serial.println(i,HEX);
-#endif  
+  Serial.print(Pkt.len, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.dest_addr, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.src_addr, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.port, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.device_info, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.txId, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.raw, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.filtered, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.battery, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.unknown, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.checksum, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.RSSI, HEX);
+  Serial.print("\t");
+  Serial.print(Pkt.LQI2, HEX);
+  Serial.println(" OK");
+#endif
 }
 
 void loop() {
-  if (get_packet (&Pkt))
+  unsigned long current_time;
+  
+  if (next_time != 0) {
+#ifdef DEBUG
+    Serial.print("next_time - ");
+    Serial.print(next_time);
+    Serial.print(" current_time - ");
+    Serial.print(millis());
+    Serial.print(" interval - ");
+    Serial.println(next_time - millis() - 3000);
+#endif
+    current_time = millis();
+    if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
+      delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+#ifdef DEBUG
+      Serial.println("WakeUp");
+#endif
+    }
+    else {
+#ifdef DEBUG
+      Serial.println("Timer overflow");
+#endif
+      next_time = 0;
+    }
+  }
+  if (get_packet ())
   {
-     print_packet (&Pkt);
+    print_packet ();
   }
 
 }
