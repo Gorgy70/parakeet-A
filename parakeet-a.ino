@@ -346,14 +346,15 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
     if (mySerial.available()) {
       SerialBuffer[loop] = mySerial.read();
       loop++;
+      if (loop > sizeof(SerialBuffer)) loop = 0; // Контролируем переполнение буфера
       if (loop > len) {
         if (strncmp(command,SerialBuffer[loop-len],len) == 0) {
           ret = true;
-          break;
         }
       }  
     } 
     else {
+      if (ret) break;
       delayMicroseconds(100);
     }
   }
@@ -568,9 +569,10 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
         catch_time = current_time - 500 * channel_index; // Приводим к каналу 0
         nRet = true;
       } 
-      if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
+//      if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
+      if (next_time != 0 && !nRet) {
 #ifdef DEBUG
-        Serial.print("Chanel = 0. Second try.");
+        Serial.print("Second try. Chanel = ");
         Serial.print(nChannels[channel_index]);
         Serial.print(" Time = ");
         Serial.println(current_time);
