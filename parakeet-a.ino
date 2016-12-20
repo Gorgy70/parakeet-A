@@ -12,6 +12,7 @@
 #define TX_PIN   9            // Tx контакт для последовательного порта
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE 300000    // 5 минут
+#define SERIAL_BUUFER_LEN 190 // Размер буфера для приема данных от GSM модема
 
 #define my_webservice_url  "http://parakeet.esen.ru/receiver.cgi"
 #define my_webservice_reply     "!ACK"
@@ -49,7 +50,13 @@ byte misses_until_failure = 2;                                                  
 // a value of zero is best if you dont care at all about battery life                               //
 
 boolean gsm_availible = false; // Доступность связи GSM
-char SerialBuffer[190] ; // Буффер для чтения данных их последовательного порта
+boolean modem_availible = false; // Доступность модема на порту
+char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения данных их последовательного порта
+
+// Коды ошибок мигают лампочкой в двоичной системе
+// 1 - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
+// 2 - Не подключен модем.
+// 3 - Нет мобильной связи
 
 typedef struct _Dexcom_packet
 {
@@ -159,6 +166,29 @@ unsigned long dex_num_decoder (unsigned int usShortFloat)
     return usMantissa << usExponent;
 }
 
+void blink_sequence(const char *sequence) {
+  byte i;
+
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(500); 
+  for (i = 0; i < strlen(sequence); i++) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    switch (sequence[i]) {
+      case '0': 
+        delay(500);
+        break;
+      case '1': 
+        delay(1000);
+        break;
+      default:
+        delay(2000);
+        break;
+    }
+    digitalWrite(LED_BUILTIN, LOW);
+  }  
+  delay(500); 
+}
+
 void clearSettings()
 {
   memset (&settings, 0, sizeof (settings));
@@ -198,6 +228,7 @@ void loadSettingsFromFlash()
     Serial.println("Settings checksum error. Load defaults");
 #endif
     clearSettings();
+    blink_sequence("0001");
   }
 #ifdef DEBUG
   Serial.print("Dexcom ID: ");
@@ -335,20 +366,21 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
     ret = true;
   } 
   else {
-    ret - false;
+    ret = false;
   }  
-  memset (&SerialBuffer,0,sizeof(SerialBuffer));
-  mySerial.write(command);
-  mySerial.write("\r\n"); // enter key
+  memset (SerialBuffer,0,sizeof(SerialBuffer));
+//  mySerial.write(command);
+//  mySerial.write("\r\n"); // enter key
+  mySerial.println(command);
   timeout_time = millis() + timeout * 1000;
   while (millis() < timeout_time)
   {
     if (mySerial.available()) {
       SerialBuffer[loop] = mySerial.read();
       loop++;
-      if (loop > sizeof(SerialBuffer)) loop = 0; // Контролируем переполнение буфера
+      if (loop > SERIAL_BUUFER_LEN) loop = 0; // Контролируем переполнение буфера
       if (loop > len) {
-        if (strncmp(command,SerialBuffer[loop-len],len) == 0) {
+        if (strncmp(response,&SerialBuffer[loop-len],len) == 0) {
           ret = true;
         }
       }  
@@ -403,9 +435,24 @@ void gsm_goto_sleep() {
 }
 
 void init_GSM() {
+  if (!modem_availible) {
+    if (!gsm_command("AT","OK",2)) {
+      delay(200);
+      if (!gsm_command("AT","OK",2)) {
+        mySerial.write(27);
+        delay(300);
+        if (!gsm_command("AT","OK",2)) {
+          blink_sequence("0010");
+          return;
+        }
+      }
+    }
+    modem_availible = true;
+  }
   gsm_command("ATZ","OK",10); // Установить параметры по умолчанию 
   gsm_command("ATE0","OK", 2); // Выключить эхо 
-  gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
+  gsm_command("AT+CFUN=0", "OK",10);
+  gsm_availible = gsm_command("AT+CFUN=1,1", "Call Ready", 30); // Подключаемся к сети  
   
   if (gsm_availible) {
     gsm_command("AT+CMGF=1","OK",2); // Устанавливаем текстовый режим чтения смс
@@ -413,6 +460,9 @@ void init_GSM() {
     set_gprs_profile();
     gsm_goto_sleep();
   }  
+  else {
+    blink_sequence("0011");
+  }
 }
 
 void gsm_get_location(char *location) {
@@ -445,7 +495,7 @@ void gsm_get_battery(byte *percent,int *millivolts) {
   percent = 0;
   millivolts = 0;
   if (gsm_command("AT+CBC","OK",2)) {
-    sscanf(SerialBuffer[6],"%h,%h,%d",&charging,&percent,&millivolts);
+    sscanf(&SerialBuffer[6],"%h,%h,%d",&charging,&percent,&millivolts);
   }  
 }
 
@@ -469,9 +519,11 @@ void setup() {
   digitalWrite(SS, HIGH);
 
   init_CC2500();  // initialise CC2500 registers
+//  mySerial.begin(19200);
   mySerial.begin(9600);
   loadSettingsFromFlash(); 
 #ifdef GSM-MODEM
+  digitalWrite(DTR_PIN, LOW);
   init_GSM();
 #endif
 }
@@ -487,6 +539,7 @@ void reset_offsets() {
 void swap_channel(unsigned long channel, byte newFSCTRL0) {
 
   SendStrobe(SIDLE);
+  SendStrobe(SFRX);
   //   WriteReg(FSCTRL0,newFSCTRL0);
   WriteReg(CHANNR, channel);
   SendStrobe(SRX);  //RX
@@ -635,26 +688,31 @@ void print_packet() {
   int batteryMillivolts = 0;
   
 #ifdef GSM-MODEM
-  digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
+  if (!gsm_availible) {
+    init_GSM();
+  }
+  if (gsm_availible) {
+    digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
 
-  gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
-  gsm_command("AT+HTTPINIT", "OK", 10); // Начинаем http сессию
-  gsm_command("AT+HTTPPARA=\"CID\",1", "OK", 2) ;  
+    gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
+    gsm_command("AT+HTTPINIT", "OK", 10); // Начинаем http сессию
+    gsm_command("AT+HTTPPARA=\"CID\",1", "OK", 2) ;  
 
-  gsm_get_location(lastLocation);
-  gsm_get_battery(batteryPercent, batteryMillivolts);
+    gsm_get_location(lastLocation);
+    gsm_get_battery(batteryPercent, batteryMillivolts);
 // Адрес сервера паракита
-  sprintf(params,"?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s",millis(),dex_tx_id,settings.password_code,dex_num_decoder(Pkt.raw),
+    sprintf(params,"?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s",millis(),dex_tx_id,settings.password_code,dex_num_decoder(Pkt.raw),
                                                                                       dex_num_decoder(Pkt.filtered)*2,Pkt.battery,millis()-catch_time,
                                                                                       batteryPercent, batteryMillivolts, analogRead(8)-290, lastLocation);         
-  sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s%s\" ",settings.http_url,params);
+    sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s%s\" ",settings.http_url,params);
 
-  gsm_command(gsm_cmd,"OK",2) ;
+    gsm_command(gsm_cmd,"OK",2) ;
 
-  gsm_command("AT+HTTPPARA=\"UA\",\"" my_user_agent "\"", "OK", 2);  // User agent для http запроса
-  gsm_command("AT+HTTPACTION=0", "+HTTPACTION: 0,200,", 60) ; // Отправляем запрос на сервер
-  gsm_command("AT+HTTPREAD", my_webservice_reply , 2) ; // Читаем ответ вэб-сервиса
-  gsm_command("AT+HTTPTERM", "OK", 2); // Завершаем http сессию
+    gsm_command("AT+HTTPPARA=\"UA\",\"" my_user_agent "\"", "OK", 2);  // User agent для http запроса
+    gsm_command("AT+HTTPACTION=0", "+HTTPACTION: 0,200,", 60) ; // Отправляем запрос на сервер
+    gsm_command("AT+HTTPREAD", my_webservice_reply , 2) ; // Читаем ответ вэб-сервиса
+    gsm_command("AT+HTTPTERM", "OK", 2); // Завершаем http сессию
+  }  
 #endif
 #ifdef DEBUG
   Serial.print(Pkt.len, HEX);
@@ -717,7 +775,9 @@ void loop() {
     print_packet ();
   }
 #ifdef GSM-MODEM
-  read_sms(); // Прочитаем полученные смс-ки
+  if (gsm_availible) {
+    read_sms(); // Прочитаем полученные смс-ки
+  }  
 #endif
 
 }
