@@ -13,6 +13,7 @@
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE 300000    // 5 минут
 #define SERIAL_BUUFER_LEN 190 // Размер буфера для приема данных от GSM модема
+#define GSM_DELAY 500         // Задержка между командами модема
 
 #define my_webservice_url  "http://parakeet.esen.ru/receiver.cgi"
 #define my_webservice_reply     "!ACK"
@@ -186,8 +187,8 @@ void blink_sequence(const char *sequence) {
         break;
     }
     digitalWrite(LED_BUILTIN, LOW);
+    delay(500); 
   }  
-  delay(500); 
 }
 
 void clearSettings()
@@ -354,6 +355,8 @@ char ReadStatus(char addr) {
   return y;
 }
 
+void(* resetFunc) (void) = 0; // объявляем функцию reset 
+
 #ifdef GSM-MODEM
 boolean gsm_command(const char *command, const char *response, int timeout) {
   boolean ret;
@@ -369,7 +372,7 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   else {
     ret = false;
   }  
-  memset (SerialBuffer,0,sizeof(SerialBuffer));
+//  memset (SerialBuffer,0,sizeof(SerialBuffer));
 //  mySerial.write(command);
 //  mySerial.write("\r\n"); // enter key
   mySerial.println(command);
@@ -391,6 +394,7 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
       delayMicroseconds(100);
     }
   }
+  SerialBuffer[loop] = '\0';
 #ifdef DEBUG
   Serial.print("GSM Command = ");
   Serial.println(command);
@@ -409,36 +413,140 @@ boolean set_gprs_profile() {
   boolean ret;
   char    cmd[40];
   
+  delay(200);
   gsm_command("AT+SAPBR=0,1", "OK", 3); // Сбросим настроенный GPRS профиль
+  delay(200);
   ret = gsm_command("AT+SAPBR=3,1,\"Contype\",\"GPRS\"", "OK", 2); // Настраиваем мобильный интернет 2G
   if (ret) {
     sprintf(cmd,"AT+SAPBR=3,1,\"APN\",\"%s\"",settings.gsm_apn);   // Точка доступа
+    delay(200);
     ret = gsm_command(cmd,"OK",2);
     if (ret) {
+      delay(200);
       ret = gsm_command("AT+SAPBR=1,1", "OK", 30); // Применяем настройки
     }
   }
   return ret;    
 }
 
+void set_settings(char *settings_str,byte idx,byte max_len) {
+  byte i1 = idx;  
+  byte i2 = 0;
+
+  while (SerialBuffer[i1] == ' ') {
+    i1++;
+    if (i1 == SERIAL_BUUFER_LEN) return;
+  }
+  while (isPrintable(SerialBuffer[i1]) and SerialBuffer[i1] != ' ') {
+    settings_str[i2] = SerialBuffer[i1];
+    i1++;
+    if (i1 == SERIAL_BUUFER_LEN) break;
+    i2++;
+    if (i2 == max_len-1) break;
+  }
+  settings_str[i2] = '\0';
+  saveSettingsToFlash();
+}
+
+void send_sms(char *cmd, char *data, byte idx) {
+  char phone_number[15];
+  byte i1 = idx;
+  byte i2 = 0;
+
+  while (i1 > 0) {
+    if (SerialBuffer[i1] == '"' && SerialBuffer[i1+1] == '+') break;
+    i1--;
+  }
+  if (i1 == 0) return;
+  while (SerialBuffer[i1] != ',') {
+    phone_number[i2] = SerialBuffer[i1];
+    i1++;
+    i2++;
+    if (i2 == 14) break;
+  }
+  phone_number[i2] = '\0';
+#ifdef DEBUG
+  Serial.print("SMS to number = ");
+  Serial.println(phone_number);
+  Serial.print(cmd);
+  Serial.println(data);
+#endif
+  mySerial.print("AT+CMGS=");
+  delay(GSM_DELAY);
+  if (gsm_command(phone_number,">",2)) {
+    delay(GSM_DELAY);
+    mySerial.print(cmd);
+    delay(GSM_DELAY);
+    mySerial.print(data);
+    delay(GSM_DELAY);
+    gsm_command("\x01A","OK",20);
+  }
+}
+
 void read_sms() {
   boolean ret;
+  byte i;
+  boolean reboot = false;
 
+  delay(GSM_DELAY);
   gsm_command("AT+CMGL=\"REC UNREAD\"" ,"OK",5); // Читаем все новые смс-ки в буфер
-// Здесь надо разбирать принятый буфер, читать команды  и отправлять ответы
+  for (i = 0; i < SERIAL_BUUFER_LEN - 4; i++) {
+    if (strncmp("APN ",&SerialBuffer[i],4) == 0) {
+      set_settings(settings.gsm_apn,i+4,32);
+      set_gprs_profile();      
+      send_sms("APN:",settings.gsm_apn,i);
+    }
+    if (strncmp("DEFAULTS",&SerialBuffer[i],8) == 0) {
+      clearSettings();
+      saveSettingsToFlash();
+      send_sms("DEFAULTS:","OK",i);
+    }
+    if (strncmp("TRANSMIT ",&SerialBuffer[i],9) == 0) {
+      set_settings(transmitter_id,i+9,56);
+      settings.dex_tx_id = asciiToDexcomSrc (transmitter_id);
+      dex_tx_id = settings.dex_tx_id;
+      saveSettingsToFlash();
+      send_sms("TRANSMIT:",transmitter_id,i);
+    }
+    if (strncmp("HTTP ",&SerialBuffer[i],5) == 0) {
+      set_settings(settings.http_url,i+5,56);
+      saveSettingsToFlash();
+      send_sms("HTTP:",settings.http_url,i);
+    }
+    if (strncmp("PWD ",&SerialBuffer[i],4) == 0) {
+      set_settings(settings.password_code,i+4,6);
+      saveSettingsToFlash();
+      send_sms("PWD:",settings.password_code,i);
+    }
+    if (strncmp("REBOOT",&SerialBuffer[i],6) == 0) {
+      reboot = true;
+      send_sms("REBOOT:","OK",i);
+    }
+    if (strncmp("SETTINGS",&SerialBuffer[i],8) == 0) {
+      send_sms("TRANSMIT:",transmitter_id,i);
+      send_sms("APN:",settings.gsm_apn,i);
+      send_sms("HTTP:",settings.http_url,i);
+      send_sms("PWD:",settings.password_code,i);     
+    }
+  }
+  delay(200);
   gsm_command("AT+CMGDA=\"DEL READ\"","OK",5); // Удалить прочитанные смс-ки
+  delay(200);
   gsm_command("AT+CMGDA=\"DEL SENT\"","OK",5); // Удалить отправленные смс-ки
+  if (reboot) resetFunc();
 }
 
 void gsm_goto_sleep() {
-  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
+  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   digitalWrite(DTR_PIN, HIGH);
 }
 
 void init_GSM() {
   if (!modem_availible) {
     if (!gsm_command("AT","OK",2)) {
+      digitalWrite(DTR_PIN, HIGH);
       delay(200);
+      digitalWrite(DTR_PIN, LOW);
       if (!gsm_command("AT","OK",2)) {
         mySerial.write(27);
         delay(300);
@@ -453,11 +561,21 @@ void init_GSM() {
   gsm_command("ATZ","OK",10); // Установить параметры по умолчанию 
   gsm_command("ATE0","OK", 2); // Выключить эхо 
   gsm_command("AT+CFUN=0", "OK",10);
-  gsm_availible = gsm_command("AT+CFUN=1,1", "Call Ready", 30); // Подключаемся к сети  
-  
+//  delay(200);
+//  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
+  delay(200);
+  gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
   if (gsm_availible) {
-    gsm_command("AT+CMGF=1","OK",2); // Устанавливаем текстовый режим чтения смс
-    read_sms();
+    delay(500);
+//    gsm_command("AT+CMGF?","OK",10); // Устанавливаем текстовый режим чтения смс
+    gsm_command("AT+CPMS?","OK",2);
+// Устанавливаем текстовый режим чтения смс
+    if (gsm_command("AT+CMGF=1","OK",10)) { 
+      read_sms();
+    }  
+    else {
+      gsm_command("AT+CMGL=0","OK",10);
+    }
     set_gprs_profile();
     gsm_goto_sleep();
   }  
@@ -475,9 +593,9 @@ void gsm_get_location(char *location) {
 
   location[0]='\0';
   if (gsm_command("AT+CIPGSMLOC=1,1","OK",15)) {
-    if (strlen(SerialBuffer)>12){
-      sscanf(&SerialBuffer[12],"%d.%D,%h.%D,",&longitudeMajor,&longitudeMinor,&latitudeMajor,&latitudeMinor);
-      if ((longitudeMajor==0)&&(SerialBuffer[12]=='-')) {
+    if (strlen(SerialBuffer)>14){
+      sscanf(&SerialBuffer[14],"%d.%D,%h.%D,",&longitudeMajor,&longitudeMinor,&latitudeMajor,&latitudeMinor);
+      if ((longitudeMajor==0)&&(SerialBuffer[14]=='-')) {
          minus[0]='-';
       }
       else
@@ -505,7 +623,7 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 void setup() {
   pinMode(GDO0_PIN, INPUT);
   pinMode(DTR_PIN, OUTPUT);
-  analogReference(INTERNAL);
+//  analogReference(INTERNAL);
 #ifdef DEBUG
   Serial.begin(9600);
   while (!Serial) {
@@ -520,6 +638,8 @@ void setup() {
   digitalWrite(SS, HIGH);
 
   init_CC2500();  // initialise CC2500 registers
+//  mySerial.begin(115200);
+//  mySerial.begin(57600);
 //  mySerial.begin(19200);
   mySerial.begin(9600);
   loadSettingsFromFlash(); 
@@ -682,7 +802,7 @@ boolean get_packet (void) {
 void print_packet() {
   byte i;
   char gsm_cmd[180];
-  char params[128];
+//  char params[128];
   char lastLocation[30];  
   byte batteryPercent = 0;
   byte batteryCharging;
@@ -694,24 +814,33 @@ void print_packet() {
   }
   if (gsm_availible) {
     digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
+    mySerial.write(27);
 
     gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
+    delay(GSM_DELAY);
     gsm_command("AT+HTTPINIT", "OK", 10); // Начинаем http сессию
+    delay(GSM_DELAY);
     gsm_command("AT+HTTPPARA=\"CID\",1", "OK", 2) ;  
-
+    delay(GSM_DELAY);
     gsm_get_location(lastLocation);
+    delay(GSM_DELAY);
     gsm_get_battery(batteryPercent, batteryMillivolts);
 // Адрес сервера паракита
-    sprintf(params,"?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s",millis(),dex_tx_id,settings.password_code,dex_num_decoder(Pkt.raw),
-                                                                                      dex_num_decoder(Pkt.filtered)*2,Pkt.battery,millis()-catch_time,
-                                                                                      batteryPercent, batteryMillivolts, analogRead(8)-290, lastLocation);         
-    sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s%s\" ",settings.http_url,params);
+    sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s\" ",settings.http_url,millis(),dex_tx_id,settings.password_code,
+                                                                                                                           dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
+                                                                                                                           Pkt.battery,millis()-catch_time,batteryPercent, batteryMillivolts, 
+                                                                                                                           analogRead(8)-290, lastLocation);         
+//    sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s%s\" ",settings.http_url,params);
 
+    delay(GSM_DELAY);
     gsm_command(gsm_cmd,"OK",2) ;
-
+    delay(GSM_DELAY);
     gsm_command("AT+HTTPPARA=\"UA\",\"" my_user_agent "\"", "OK", 2);  // User agent для http запроса
+    delay(GSM_DELAY);
     gsm_command("AT+HTTPACTION=0", "+HTTPACTION: 0,200,", 60) ; // Отправляем запрос на сервер
-    gsm_command("AT+HTTPREAD", my_webservice_reply , 2) ; // Читаем ответ вэб-сервиса
+    delay(GSM_DELAY);
+    gsm_command("AT+HTTPREAD", my_webservice_reply , 20) ; // Читаем ответ вэб-сервиса
+    delay(GSM_DELAY);
     gsm_command("AT+HTTPTERM", "OK", 2); // Завершаем http сессию
   }  
 #endif
