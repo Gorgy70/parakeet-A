@@ -386,6 +386,7 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
       if (loop > len) {
         if (strncmp(response,&SerialBuffer[loop-len],len) == 0) {
           ret = true;
+          delayMicroseconds(100);
         }
       }  
     } 
@@ -445,7 +446,6 @@ void set_settings(char *settings_str,byte idx,byte max_len) {
     if (i2 == max_len-1) break;
   }
   settings_str[i2] = '\0';
-  saveSettingsToFlash();
 }
 
 void send_sms(char *cmd, char *data, byte idx) {
@@ -493,6 +493,7 @@ void read_sms() {
   for (i = 0; i < SERIAL_BUUFER_LEN - 4; i++) {
     if (strncmp("APN ",&SerialBuffer[i],4) == 0) {
       set_settings(settings.gsm_apn,i+4,32);
+      saveSettingsToFlash();
       set_gprs_profile();      
       send_sms("APN:",settings.gsm_apn,i);
     }
@@ -502,7 +503,7 @@ void read_sms() {
       send_sms("DEFAULTS:","OK",i);
     }
     if (strncmp("TRANSMIT ",&SerialBuffer[i],9) == 0) {
-      set_settings(transmitter_id,i+9,56);
+      set_settings(transmitter_id,i+9,5);
       settings.dex_tx_id = asciiToDexcomSrc (transmitter_id);
       dex_tx_id = settings.dex_tx_id;
       saveSettingsToFlash();
@@ -603,6 +604,10 @@ void gsm_get_location(char *location) {
         minus[0]='\0';
       }
       sprintf(location,"%hhd.%ld,%s%d.%ld",latitudeMajor,latitudeMinor,minus,longitudeMajor,longitudeMinor);
+#ifdef DEBUG
+      Serial.print("Location = ");
+      Serial.println(location);
+#endif
 //      if ((longitudeMajor==0)&&(captureBuffer[2]=='-')) longitudeMajor=255;
     }
   }
@@ -614,7 +619,7 @@ void gsm_get_battery(byte *percent,int *millivolts) {
   percent = 0;
   millivolts = 0;
   if (gsm_command("AT+CBC","OK",2)) {
-    sscanf(&SerialBuffer[6],"%h,%h,%d",&charging,&percent,&millivolts);
+    sscanf(&SerialBuffer[6],"%h,%h,%d",&charging,percent,millivolts);
   }  
 }
 
@@ -824,7 +829,7 @@ void print_packet() {
     delay(GSM_DELAY);
     gsm_get_location(lastLocation);
     delay(GSM_DELAY);
-    gsm_get_battery(batteryPercent, batteryMillivolts);
+    gsm_get_battery(&batteryPercent, &batteryMillivolts);
 // Адрес сервера паракита
     sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s\" ",settings.http_url,millis(),dex_tx_id,settings.password_code,
                                                                                                                            dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
