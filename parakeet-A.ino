@@ -6,10 +6,10 @@
 #include <EEPROM.h>
 #include "cc2500_REG.h"
 
-#define GDO0_PIN 2            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#define GDO0_PIN 4            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define DTR_PIN  5            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
-#define RX_PIN   8            // Rx контакт для последовательного порта
-#define TX_PIN   9            // Tx контакт для последовательного порта
+#define RX_PIN   9            // Rx контакт для последовательного порта
+#define TX_PIN   8            // Tx контакт для последовательного порта
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE 300000    // 5 минут
 #define SERIAL_BUUFER_LEN 190 // Размер буфера для приема данных от GSM модема
@@ -385,7 +385,7 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
       delayMicroseconds(100);
       SerialBuffer[loop] = mySerial.read();
       loop++;
-      if (loop > SERIAL_BUUFER_LEN) loop = 0; // Контролируем переполнение буфера
+      if (loop == SERIAL_BUUFER_LEN) loop = 0; // Контролируем переполнение буфера
       if (loop > len) {
         if (strncmp(response,&SerialBuffer[loop-len],len) == 0) {
           ret = true;
@@ -394,8 +394,10 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
       }  
     } 
     else {
-      if (ret) break;
-      delayMicroseconds(100);
+      if (ret) {
+        delayMicroseconds(100);
+        break;
+      }
     }
   }
   SerialBuffer[loop] = '\0';
@@ -671,6 +673,9 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 #endif
 
 void setup() {
+#ifdef DEBUG
+  byte b1;
+#endif
  
   pinMode(GDO0_PIN, INPUT);
   pinMode(DTR_PIN, OUTPUT);
@@ -689,6 +694,14 @@ void setup() {
   digitalWrite(SS, HIGH);
 
   init_CC2500();  // initialise CC2500 registers
+#ifdef DEBUG
+  Serial.print("CC2500 PARTNUM=");
+  b1 = ReadStatus(PARTNUM);
+  Serial.println(b1,HEX);
+  Serial.print("CC2500 VERSION=");
+  b1 = ReadStatus(VERSION);
+  Serial.println(b1,HEX);
+#endif
 //  mySerial.begin(115200);
 //  mySerial.begin(57600);
 //  mySerial.begin(19200);
