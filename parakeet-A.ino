@@ -6,10 +6,10 @@
 #include <EEPROM.h>
 #include "cc2500_REG.h"
 
-#define GDO0_PIN 2            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#define GDO0_PIN 4            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define DTR_PIN  5            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
-#define RX_PIN   8            // Rx контакт для последовательного порта
-#define TX_PIN   9            // Tx контакт для последовательного порта
+#define TX_PIN   8            // Tx контакт для последовательного порта
+#define RX_PIN   9            // Rx контакт для последовательного порта
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE 300000    // 5 минут
 #define SERIAL_BUUFER_LEN 190 // Размер буфера для приема данных от GSM модема
@@ -29,9 +29,10 @@ char transmitter_id[] = "6518Y";
 
 unsigned long packet_received = 0;
 
-byte fOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
+//byte fOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
 //byte defaultfOffset[NUM_CHANNELS] = { 0x00, 0xD5, 0xE6, 0xE5 };
 //byte fOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
+byte fOffset[NUM_CHANNELS] = { 0xE4, 0xE3, 0xE2, 0xE2 };
 //byte defaultfOffset[NUM_CHANNELS] = { 0xCE, 0xD5, 0xE6, 0xE5 };
 byte nChannels[NUM_CHANNELS] = { 0, 100, 199, 209 };
 //unsigned long waitTimes[NUM_CHANNELS] = { 13500, 500, 500, 500 };
@@ -280,6 +281,64 @@ char SendStrobe(char strobe)
   return result;
 }
 
+void init_CC2500_2() {
+//FSCTRL1 and MDMCFG4 have the biggest impact on sensitivity...
+   
+   WriteReg(PATABLE, 0x00);
+   WriteReg(IOCFG0, 0x01);
+   WriteReg(PKTLEN, 0xff);
+   WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
+//   WriteReg(PKTCTRL1, 0x04);
+   WriteReg(PKTCTRL0, 0x05);
+   WriteReg(ADDR, 0x00);
+   WriteReg(CHANNR, 0x00);
+
+   WriteReg(FSCTRL1, 0x0f); 
+   WriteReg(FSCTRL0, 0x00);  
+  
+   WriteReg(FREQ2, 0x5d);
+   WriteReg(FREQ1, 0x44);
+   WriteReg(FREQ0, 0xeb);
+   
+   WriteReg(FREND1, 0xb6);  
+   WriteReg(FREND0, 0x10);  
+
+   // Bandwidth
+   //0x4a = 406 khz
+   //0x5a = 325 khz
+   // 300 khz is supposedly what dex uses...
+   //0x6a = 271 khz
+   //0x7a = 232 khz
+   WriteReg(MDMCFG4, 0x7a); //appear to get better sensitivity
+   WriteReg(MDMCFG3, 0xf8);
+   WriteReg(MDMCFG2, 0x73);
+   WriteReg(MDMCFG1, 0x23);
+   WriteReg(MDMCFG0, 0x3b);
+   
+   WriteReg(DEVIATN, 0x40);
+
+   WriteReg(MCSM2, 0x07);
+   WriteReg(MCSM1, 0x30);
+   WriteReg(MCSM0, 0x18);  
+   WriteReg(FOCCFG, 0x16); //36
+   WriteReg(FSCAL3, 0xa9);
+   WriteReg(FSCAL2, 0x0a);
+   WriteReg(FSCAL1, 0x00);
+   WriteReg(FSCAL0, 0x11);
+  
+   WriteReg(AGCCTRL2, 0x03);  
+   WriteReg(AGCCTRL1, 0x00);
+   WriteReg(AGCCTRL0, 0x91);
+   //
+   WriteReg(TEST2, 0x81);
+   WriteReg(TEST1, 0x35); 
+   WriteReg(TEST0, 0x0b);  
+   
+   WriteReg(FOCCFG, 0x0A);    // allow range of +/1 FChan/4 = 375000/4 = 93750.  No CS GATE
+   WriteReg(BSCFG, 0x6C);
+ 
+}
+
 void init_CC2500() {
 
   SendStrobe(SRES);       // software reset for CC2500
@@ -385,7 +444,7 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
       delayMicroseconds(100);
       SerialBuffer[loop] = mySerial.read();
       loop++;
-      if (loop > SERIAL_BUUFER_LEN) loop = 0; // Контролируем переполнение буфера
+      if (loop == SERIAL_BUUFER_LEN) loop = 0; // Контролируем переполнение буфера
       if (loop > len) {
         if (strncmp(response,&SerialBuffer[loop-len],len) == 0) {
           ret = true;
@@ -394,8 +453,10 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
       }  
     } 
     else {
-      if (ret) break;
-      delayMicroseconds(100);
+      if (ret) {
+        delayMicroseconds(100);
+        break;
+      }
     }
   }
   SerialBuffer[loop] = '\0';
@@ -671,6 +732,9 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 #endif
 
 void setup() {
+#ifdef DEBUG
+  byte b1;
+#endif
  
   pinMode(GDO0_PIN, INPUT);
   pinMode(DTR_PIN, OUTPUT);
@@ -688,7 +752,16 @@ void setup() {
   //  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
   digitalWrite(SS, HIGH);
 
-  init_CC2500();  // initialise CC2500 registers
+//  init_CC2500();  // initialise CC2500 registers
+  init_CC2500_2();  // initialise CC2500 registers
+#ifdef DEBUG
+  Serial.print("CC2500 PARTNUM=");
+  b1 = ReadStatus(PARTNUM);
+  Serial.println(b1,HEX);
+  Serial.print("CC2500 VERSION=");
+  b1 = ReadStatus(VERSION);
+  Serial.println(b1,HEX);
+#endif
 //  mySerial.begin(115200);
 //  mySerial.begin(57600);
 //  mySerial.begin(19200);
@@ -712,7 +785,7 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 
   SendStrobe(SIDLE);
   SendStrobe(SFRX);
-  //   WriteReg(FSCTRL0,newFSCTRL0);
+  WriteReg(FSCTRL0,newFSCTRL0);
   WriteReg(CHANNR, channel);
   SendStrobe(SRX);  //RX
   while (ReadStatus(MARCSTATE) != 0x0d) {
@@ -777,7 +850,6 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
       // Идет прием пакета
     }
     if (packet_on_board) {
-      fOffset[channel_index] = ReadStatus(FREQEST);
       ReadRadioBuffer();
       if (Pkt.src_addr == dex_tx_id) {
 #ifdef DEBUG
@@ -791,6 +863,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
           Serial.println("unknown");
         }
 #endif
+        fOffset[channel_index] += ReadStatus(FREQEST);
         catch_time = current_time - 500 * channel_index; // Приводим к каналу 0
         nRet = true;
       } 
