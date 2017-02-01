@@ -87,6 +87,9 @@
 #define RCCTRL1_STATUS   0x003C  // Last RC oscillator calibration result
 #define RCCTRL0_STATUS   0x003D  // Last RC oscillator calibration result
 
+
+// burst write registers
+#define PATABLE          0x3E    // PA control settings table
 // RX and TX buffers
 #define TXFIFO           0x3F
 #define RXFIFO           0x3F
