@@ -25,7 +25,8 @@ SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
 unsigned long dex_tx_id;
 //char transmitter_id[] = "ABCDE";
-char transmitter_id[] = "6518Y";
+//char transmitter_id[] = "6518Y";
+char transmitter_id[] = "69NL1";
 
 unsigned long packet_received = 0;
 
@@ -285,7 +286,8 @@ void init_CC2500_2() {
 //FSCTRL1 and MDMCFG4 have the biggest impact on sensitivity...
    
    WriteReg(PATABLE, 0x00);
-   WriteReg(IOCFG0, 0x01);
+//   WriteReg(IOCFG0, 0x01);
+   WriteReg(IOCFG0, 0x06); // Во время приема пакета GD0 = HIGH
    WriteReg(PKTLEN, 0xff);
    WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
 //   WriteReg(PKTCTRL1, 0x04);
