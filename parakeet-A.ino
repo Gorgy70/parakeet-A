@@ -1,5 +1,6 @@
-#define DEBUG
+//#define DEBUG
 #define GSM-MODEM
+//#define BLINK-LED
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
@@ -12,7 +13,13 @@
 #define RX_PIN   9            // Rx контакт для последовательного порта
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE 300000    // 5 минут
-#define SERIAL_BUUFER_LEN 190 // Размер буфера для приема данных от GSM модема
+
+#ifdef DEBUG
+#define SERIAL_BUUFER_LEN 90 // Размер буфера для приема данных от GSM модема
+#else
+#define SERIAL_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
+#endif
+
 #define GSM_DELAY 500         // Задержка между командами модема
 
 #define my_webservice_url  "http://parakeet.esen.ru/receiver.cgi"
@@ -26,7 +33,7 @@ SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 unsigned long dex_tx_id;
 //char transmitter_id[] = "ABCDE";
 //char transmitter_id[] = "6518Y";
-char transmitter_id[] = "69NL1";
+  char transmitter_id[] = "69NL1";
 
 unsigned long packet_received = 0;
 
@@ -170,6 +177,7 @@ unsigned long dex_num_decoder (unsigned int usShortFloat)
     return usMantissa << usExponent;
 }
 
+#ifdef BLINK-LED
 void blink_sequence(const char *sequence) {
   byte i;
 
@@ -192,6 +200,7 @@ void blink_sequence(const char *sequence) {
     delay(500); 
   }  
 }
+#endif
 
 void clearSettings()
 {
@@ -233,7 +242,9 @@ void loadSettingsFromFlash()
     Serial.println("Settings checksum error. Load defaults");
 #endif
     clearSettings();
+#ifdef BLINK-LED
     blink_sequence("0001");
+#endif
   }
 #ifdef DEBUG
   Serial.print("Dexcom ID: ");
@@ -241,6 +252,7 @@ void loadSettingsFromFlash()
 #endif
 }
 
+#ifdef BLINK-LED
 void blink_builtin_led_quarter() {  // Blink quarter seconds
   if ((millis() / 250) % 2) {
     digitalWrite(LED_BUILTIN, HIGH);
@@ -258,6 +270,7 @@ void blink_builtin_led_half() {  // Blink half seconds
     digitalWrite(LED_BUILTIN, LOW);
   }
 }
+#endif
 
 void WriteReg(char addr, char value) {
   digitalWrite(SS, LOW);
@@ -287,7 +300,7 @@ void init_CC2500_2() {
    
    WriteReg(PATABLE, 0x00);
 //   WriteReg(IOCFG0, 0x01);
-   WriteReg(IOCFG0, 0x06); // Во время приема пакета GD0 = HIGH
+   WriteReg(IOCFG0, 0x06);
    WriteReg(PKTLEN, 0xff);
    WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
 //   WriteReg(PKTCTRL1, 0x04);
@@ -425,8 +438,10 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   unsigned long timeout_time; 
   int len = strlen (response);
   int loop = 0;
-  
+
+#ifdef BLINK-LED  
   digitalWrite(LED_BUILTIN, HIGH);
+#endif
 
   if (len == 0) {
     ret = true;
@@ -472,7 +487,9 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   Serial.print("Result = ");
   Serial.println(ret);
 #endif
+#ifdef BLINK-LED  
   digitalWrite(LED_BUILTIN, LOW);
+#endif
   return ret;
 }
 
@@ -490,7 +507,7 @@ boolean set_gprs_profile() {
     ret = gsm_command(cmd,"OK",2);
     if (ret) {
       delay(200);
-      ret = gsm_command("AT+SAPBR=1,1", "OK", 30); // Применяем настройки
+      ret = gsm_command("AT+SAPBR=1,1", "OK", 90); // Применяем настройки
     }
   }
   return ret;    
@@ -603,14 +620,33 @@ void read_sms() {
   if (reboot) resetFunc();
 }
 
-void gsm_goto_sleep() {
-//  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
-  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
-//  digitalWrite(DTR_PIN, HIGH);
+void gsm_wake_up() {
+  digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
+  delay(GSM_DELAY); 
+  gsm_command("AT+CNETLIGHT=1", "OK", 2); // Включаем мигание модема
 }
 
-void init_GSM() {
+void gsm_goto_sleep() {
+//  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
+//  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
+  gsm_command("AT+CNETLIGHT=0", "OK", 2); // Отключаем мигание модема
+  digitalWrite(DTR_PIN, HIGH);
+}
+
+void init_base_gsm()
+{
+//  gsm_command("AT+IPR=9600","OK",2); // Установить скорость порта 9600
+//  gsm_command("AT+IFC=0,0","OK",2); 
+  gsm_command("ATZ","OK",10); // Установить параметры по умолчанию 
+  gsm_command("ATE0","OK", 2); // Выключить эхо 
+  gsm_command("AT+CFUN=0", "OK",10); // Отключаем мобильную связь
+}
+
+boolean init_gsm_modem()
+{
   if (!modem_availible) {
+//    gsm_command("AT+IPR=9600","OK",2); // Установить скорость порта 9600
+//    gsm_command("AT+IFC=0,0","OK",2); 
     if (!gsm_command("AT","OK",2)) {
       digitalWrite(DTR_PIN, HIGH);
       delay(200);
@@ -619,16 +655,21 @@ void init_GSM() {
         mySerial.write(27);
         delay(300);
         if (!gsm_command("AT","OK",2)) {
+#ifdef BLINK-LED
           blink_sequence("0010");
-          return;
+#endif
+          return false;
         }
       }
     }
     modem_availible = true;
-  }
-  gsm_command("ATZ","OK",10); // Установить параметры по умолчанию 
-  gsm_command("ATE0","OK", 2); // Выключить эхо 
-  gsm_command("AT+CFUN=0", "OK",10);
+  } 
+  return true;
+}
+
+void init_GSM() {
+  if (!init_gsm_modem()) return;
+  init_base_gsm();
   delay(200);
   gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   delay(200);
@@ -648,7 +689,9 @@ void init_GSM() {
     gsm_goto_sleep();
   }  
   else {
+#ifdef BLINK-LED
     blink_sequence("0011");
+#endif
   }
 }
 
@@ -748,7 +791,9 @@ void setup() {
   }
 #endif
   // initialize digital pin LED_BUILTIN as an output.
+#ifdef BLINK-LED
   pinMode(LED_BUILTIN, OUTPUT);
+#endif
 
   SPI.begin();
   //  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
@@ -764,9 +809,6 @@ void setup() {
   b1 = ReadStatus(VERSION);
   Serial.println(b1,HEX);
 #endif
-//  mySerial.begin(115200);
-//  mySerial.begin(57600);
-//  mySerial.begin(19200);
   mySerial.begin(9600);
   loadSettingsFromFlash(); 
 #ifdef GSM-MODEM
@@ -796,7 +838,7 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 }
 
 void ReadRadioBuffer() {
-  char buffer[64];
+  char buffer[32];
   byte len;
   byte i;
   byte rxbytes;
@@ -807,7 +849,7 @@ void ReadRadioBuffer() {
   Serial.print("Bytes in buffer: ");
   Serial.println(len);
 #endif
-  if (len > 0 && len < 65) {
+  if (len > 0 && len < 32) {
     for (i = 0; i < len; i++) {
       if (i < sizeof (Dexcom_packet)) {
         buffer[i] = ReadReg(RXFIFO);
@@ -845,7 +887,9 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
     if (channel_index == 0 && next_time != 0 && current_time > next_time + wait_after_time) {
       break; // Если превысыли время следующего пакета на канале 0 - выход
     }
+#ifdef BLINK-LED
     blink_builtin_led_quarter();
+#endif
     packet_on_board = false;
     while (digitalRead(GDO0_PIN) == HIGH) {
       packet_on_board = true;
@@ -934,14 +978,11 @@ void print_packet() {
   int batteryMillivolts = 0;
   
 #ifdef GSM-MODEM
+  gsm_wake_up(); // Будим GSM-модем
   if (!gsm_availible) {
     init_GSM();
   }
   if (gsm_availible) {
-    digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
-    delay(GSM_DELAY);
-//    mySerial.write(27);
-
     gsm_get_location(lastLocation);
     gsm_get_battery(&batteryPercent, &batteryMillivolts);
     gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
@@ -1021,7 +1062,8 @@ void loop() {
   }
 #ifdef GSM-MODEM
   if (gsm_availible) {
-    digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
+    gsm_wake_up(); // Будим GSM-модем
+    gsm_command("AT+CNETLIGHT=1", "OK", 2); // Включение мигание мадема
     read_sms(); // Прочитаем полученные смс-ки
     gsm_goto_sleep();
   }  
