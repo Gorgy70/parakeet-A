@@ -1,4 +1,4 @@
-#define DEBUG
+//#define DEBUG
 #define GSM-MODEM
 //#define BLINK-LED
 
@@ -847,25 +847,24 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 }
 
 void ReadRadioBuffer() {
-  char buffer[32];
   byte len;
   byte i;
   byte rxbytes;
 
-  memset (&buffer, 0, sizeof (Dexcom_packet));
+  memset (&gsm_cmd, 0, sizeof (Dexcom_packet));
   len = ReadStatus(RXBYTES);
 #ifdef DEBUG
   Serial.print("Bytes in buffer: ");
   Serial.println(len);
 #endif
-  if (len > 0 && len < 32) {
+  if (len > 0 && len < 65) {
     for (i = 0; i < len; i++) {
       if (i < sizeof (Dexcom_packet)) {
-        buffer[i] = ReadReg(RXFIFO);
+        gsm_cmd[i] = ReadReg(RXFIFO);
       }
     }
   }
-  memcpy(&Pkt, &buffer, sizeof (Dexcom_packet));
+  memcpy(&Pkt, &gsm_cmd, sizeof (Dexcom_packet));
 #ifdef DEBUG
   Serial.print("Dexcom ID: ");
   Serial.println(Pkt.src_addr);
