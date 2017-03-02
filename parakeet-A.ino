@@ -6,6 +6,11 @@
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include "cc2500_REG.h"
+#include <avr/sleep.h>     //AVR MCU power management.
+#include <avr/power.h>     //AVR MCU peripheries (Analog comparator, ADC, USI, Timers/Counters etc) management.
+#include <avr/wdt.h>       //AVR MCU watchdog timer management.
+#include <avr/io.h>        //AVR MCU IO ports management.
+#include <avr/interrupt.h> //AVR MCU interrupt flags management.
 
 #define GDO0_PIN 4            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define DTR_PIN  5            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
@@ -19,6 +24,7 @@
 #else
 #define SERIAL_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
 #endif
+#define GSM_BUUFER_LEN 180 // Размер буфера для приема данных от GSM модема
 
 #define GSM_DELAY 500         // Задержка между командами модема
 
@@ -27,6 +33,16 @@
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
 #define my_password_code  "12354"
+
+/************************************************************************************************************/
+/*
+    Constants
+
+    Enables interrupts (instead of MCU reset), when watchdog is timed out.
+    Used for wake-up MCU from power-down/sleep.
+*/
+/************************************************************************************************************/
+#define WDTCR |= _BV(WDIE)
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
@@ -62,6 +78,9 @@ byte misses_until_failure = 2;                                                  
 boolean gsm_availible = false; // Доступность связи GSM
 boolean modem_availible = false; // Доступность модема на порту
 char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения данных их последовательного порта
+char gsm_cmd[GSM_BUUFER_LEN]; // Буффер для формирования GSM команд
+
+volatile long watchdog_counter;
 
 // Коды ошибок мигают лампочкой в двоичной системе
 // 1 (0001) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
@@ -295,7 +314,7 @@ char SendStrobe(char strobe)
   return result;
 }
 
-void init_CC2500_2() {
+void init_CC2500() {
 //FSCTRL1 and MDMCFG4 have the biggest impact on sensitivity...
    
    WriteReg(PATABLE, 0x00);
@@ -352,58 +371,6 @@ void init_CC2500_2() {
    WriteReg(FOCCFG, 0x0A);    // allow range of +/1 FChan/4 = 375000/4 = 93750.  No CS GATE
    WriteReg(BSCFG, 0x6C);
  
-}
-
-void init_CC2500() {
-
-  SendStrobe(SRES);       // software reset for CC2500
-  WriteReg(IOCFG0, 0x06);
-  WriteReg(SYNC1, 0xD3);
-  WriteReg(SYNC0, 0x91);
-
-  WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
-  //  WriteReg(PKTCTRL1,0x04);
-  WriteReg(PKTCTRL0, 0x05);
-
-  WriteReg(FSCTRL1, 0x08);
-  WriteReg(FSCTRL0, 0x00);
-
-  WriteReg(FREQ2, 0x5D);
-  WriteReg(FREQ1, 0x44);
-  WriteReg(FREQ0, 0xEB);
-
-  WriteReg(MDMCFG4, 0x4A);
-  WriteReg(MDMCFG3, 0xF8);
-  WriteReg(MDMCFG2, 0x73);
-  WriteReg(MDMCFG1, 0x03);
-  WriteReg(MDMCFG0, 0x3B);
-
-  WriteReg(DEVIATN, 0x00);
-
-  WriteReg(MCSM0, 0x18);
-
-  WriteReg(FOCCFG, 0x16);
-
-  WriteReg(BSCFG, 0x6C);
-
-  WriteReg(AGCCTRL2, 0x03);
-  WriteReg(AGCCTRL1, 0x40);
-  WriteReg(AGCCTRL0, 0x91);
-
-  WriteReg(FREND1, 0x56);
-  WriteReg(FREND0, 0x10);
-
-  WriteReg(FSCAL3, 0xA9);
-  WriteReg(FSCAL2, 0x0A);
-  WriteReg(FSCAL1, 0x00);
-  WriteReg(FSCAL0, 0x11);
-
-  WriteReg(TEST2, 0x88);
-  WriteReg(TEST1, 0x31);
-  WriteReg(TEST0, 0x0B);
-
-  WriteReg(MCSM0, 0x14);   // Auto-calibrate when going from idle to RX or TX.
-  WriteReg(MCSM1, 0x00);   // Disable CCA.  After RX, go to IDLE.  After TX, go to IDLE.
 }
 
 char ReadReg(char addr) {
@@ -478,13 +445,13 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   }
   SerialBuffer[loop] = '\0';
 #ifdef DEBUG
-  Serial.print("GSM Command = ");
+  Serial.print("Command=");
   Serial.println(command);
-  Serial.print("Expected response = ");
+  Serial.print("Exp. response=");
   Serial.println(response);
-  Serial.print("Real response = ");
+  Serial.print("Response=");
   Serial.println(SerialBuffer);
-  Serial.print("Result = ");
+  Serial.print("Res=");
   Serial.println(ret);
 #endif
 #ifdef BLINK-LED  
@@ -495,18 +462,17 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
 
 boolean set_gprs_profile() {
   boolean ret;
-  char    cmd[40];
   
-  delay(200);
-  gsm_command("AT+SAPBR=0,1", "OK", 3); // Сбросим настроенный GPRS профиль
-  delay(200);
+  delay(GSM_DELAY);
+  gsm_command("AT+SAPBR=0,1", "OK", 10); // Сбросим настроенный GPRS профиль
+  delay(GSM_DELAY);
   ret = gsm_command("AT+SAPBR=3,1,\"Contype\",\"GPRS\"", "OK", 2); // Настраиваем мобильный интернет 2G
   if (ret) {
-    sprintf(cmd,"AT+SAPBR=3,1,\"APN\",\"%s\"",settings.gsm_apn);   // Точка доступа
-    delay(200);
-    ret = gsm_command(cmd,"OK",2);
+    sprintf(gsm_cmd,"AT+SAPBR=3,1,\"APN\",\"%s\"",settings.gsm_apn);   // Точка доступа
+    delay(GSM_DELAY);
+    ret = gsm_command(gsm_cmd,"OK",2);
     if (ret) {
-      delay(200);
+      delay(GSM_DELAY);
       ret = gsm_command("AT+SAPBR=1,1", "OK", 90); // Применяем настройки
     }
   }
@@ -623,7 +589,14 @@ void read_sms() {
 void gsm_wake_up() {
   digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
   delay(GSM_DELAY); 
-  gsm_command("AT+CNETLIGHT=1", "OK", 2); // Включаем мигание модема
+   // Включаем мигание модема
+  if (!gsm_command("AT+CNETLIGHT=1", "OK", 2))
+  {
+    init_gsm_modem();
+    if (modem_availible) {
+      gsm_command("AT+CNETLIGHT=1", "OK", 2);
+    }    
+  };
 }
 
 void gsm_goto_sleep() {
@@ -736,45 +709,60 @@ void gsm_get_location(char *location) {
 
 void gsm_get_battery(byte *percent,int *millivolts) {
   byte charging;  
-  char buf1[20];
   char *ptr1;
 
   if (gsm_command("AT+CBC","OK",2)) {
-    memset(buf1,0,10);
+    memset(gsm_cmd,0,10);
     charging = 0;
     *percent = 0;
     *millivolts = 0;
 // Состояние зарядки    
     ptr1 = strchr(SerialBuffer,',');
     if (ptr1 > 0) {
-      strncpy(buf1,ptr1-1,1);
-      charging = atoi(buf1);
+      strncpy(gsm_cmd,ptr1-1,1);
+      charging = atoi(gsm_cmd);
 // Процент зарядки    
-      strncpy(buf1,ptr1+1,2);
+      strncpy(gsm_cmd,ptr1+1,2);
       if (ptr1[3] != ',') {
-        buf1[2] = ptr1[3];
+        gsm_cmd[2] = ptr1[3];
       }  
-      *percent = atoi(buf1);
+      *percent = atoi(gsm_cmd);
 // Напряжение аккумулятора    
       ptr1 = strchr(ptr1+1,',');
       if (ptr1 > 0) {
-        strncpy(buf1,ptr1+1,4);
-        *millivolts = atoi(buf1);
+        strncpy(gsm_cmd,ptr1+1,4);
+        *millivolts = atoi(gsm_cmd);
       }  
     }
 //    sscanf(&SerialBuffer[8],"%d,%d,%d",&charging,percent,millivolts);
 #ifdef DEBUG
-    sprintf(buf1,"Charging = %d",charging);
-    Serial.println(buf1);
-    sprintf(buf1,"percent = %d",*percent);
-    Serial.println(buf1);
-    sprintf(buf1,"millivolts = %d",*millivolts);
-    Serial.println(buf1);
+    sprintf(gsm_cmd,"Charg=%d",charging);
+    Serial.println(gsm_cmd);
+    sprintf(gsm_cmd,"%=%d",*percent);
+    Serial.println(gsm_cmd);
+    sprintf(gsm_cmd,"mv=%d",*millivolts);
+    Serial.println(gsm_cmd);
 #endif
   }  
 }
 
 #endif
+
+/************************************************************************************************************/
+/*
+    setup_watchdog()
+    
+    Sleeps intervals: WDTO_15MS, WDTO_30MS, WDTO_60MS, WDTO_120MS, WDTO_250MS,
+                      WDTO_500MS, WDTO_1S, WDTO_2S, WDTO_4S, WDTO_8S
+    
+    NOTE: The MCU watchdog runs from internal 128kHz clock and continues to work
+          during the deepest sleep modes to provide a wake up source.
+*/
+/************************************************************************************************************/
+void setup_watchdog(byte sleep_time)
+{
+  wdt_enable(sleep_time);
+}
 
 void setup() {
 #ifdef DEBUG
@@ -799,8 +787,7 @@ void setup() {
   //  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
   digitalWrite(SS, HIGH);
 
-//  init_CC2500();  // initialise CC2500 registers
-  init_CC2500_2();  // initialise CC2500 registers
+  init_CC2500();  // initialise CC2500 registers
 #ifdef DEBUG
   Serial.print("CC2500 PARTNUM=");
   b1 = ReadStatus(PARTNUM);
@@ -815,6 +802,7 @@ void setup() {
   digitalWrite(DTR_PIN, LOW);
   init_GSM();
 #endif
+  setup_watchdog(WDTO_8S); //approximately 8 sec. of sleep
 }
 
 /*
@@ -838,25 +826,24 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 }
 
 void ReadRadioBuffer() {
-  char buffer[32];
   byte len;
   byte i;
   byte rxbytes;
 
-  memset (&buffer, 0, sizeof (Dexcom_packet));
+  memset (&gsm_cmd, 0, sizeof (Dexcom_packet));
   len = ReadStatus(RXBYTES);
 #ifdef DEBUG
   Serial.print("Bytes in buffer: ");
   Serial.println(len);
 #endif
-  if (len > 0 && len < 32) {
+  if (len > 0 && len < 65) {
     for (i = 0; i < len; i++) {
       if (i < sizeof (Dexcom_packet)) {
-        buffer[i] = ReadReg(RXFIFO);
+        gsm_cmd[i] = ReadReg(RXFIFO);
       }
     }
   }
-  memcpy(&Pkt, &buffer, sizeof (Dexcom_packet));
+  memcpy(&Pkt, &gsm_cmd, sizeof (Dexcom_packet));
 #ifdef DEBUG
   Serial.print("Dexcom ID: ");
   Serial.println(Pkt.src_addr);
@@ -874,9 +861,9 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
   swap_channel(nChannels[channel_index], fOffset[channel_index]);
 
 #ifdef DEBUG
-  Serial.print("Chanel = ");
+  Serial.print("Ch=");
   Serial.print(nChannels[channel_index]);
-  Serial.print(" Time = ");
+  Serial.print(" Time=");
   Serial.println(start_time);
 #endif
   while (true) {
@@ -899,14 +886,14 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
       ReadRadioBuffer();
       if (Pkt.src_addr == dex_tx_id) {
 #ifdef DEBUG
-        Serial.print("Packet catched. Chanel = ");
+        Serial.print("Catched.Ch=");
         Serial.print(nChannels[channel_index]);
-        Serial.print(" Interval = ");
+        Serial.print(" Int=");
         if (catch_time != 0) {
           Serial.println(current_time - 500 * channel_index - catch_time);
         }
         else {
-          Serial.println("unknown");
+          Serial.println("unkn");
         }
 #endif
         fOffset[channel_index] += ReadStatus(FREQEST);
@@ -916,9 +903,9 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 //      if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
       if (next_time != 0 && !nRet) {
 #ifdef DEBUG
-        Serial.print("Second try. Chanel = ");
+        Serial.print("Try.Ch=");
         Serial.print(nChannels[channel_index]);
-        Serial.print(" Time = ");
+        Serial.print(" Time=");
         Serial.println(current_time);
 #endif
         swap_channel(nChannels[channel_index], fOffset[channel_index]);
@@ -948,15 +935,15 @@ boolean get_packet (void) {
   if (!nRet) {
     sequential_missed_packets++;
 #ifdef DEBUG
-    Serial.print("Packet missed - ");
+    Serial.print("Missed-");
     Serial.println(sequential_missed_packets);
 #endif
     if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
       next_time = 0;
+      sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
     }
   }
   else {
-    sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
     next_time = catch_time; 
   }
 
@@ -969,13 +956,33 @@ boolean get_packet (void) {
   return nRet;
 }
 
-void print_packet() {
-  byte i;
-  char gsm_cmd[180];
-//  char params[128];
+#ifdef GSM-MODEM
+boolean send_gprs_data() {
   char lastLocation[30];  
   byte batteryPercent = 0;
-  int batteryMillivolts = 0;
+  int batteryMillivolts = 0; 
+  boolean res1;
+
+  gsm_get_location(lastLocation);
+  gsm_get_battery(&batteryPercent, &batteryMillivolts);
+  gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
+  gsm_command("AT+HTTPINIT", "OK", 10); // Начинаем http сессию
+  gsm_command("AT+HTTPPARA=\"CID\",1", "OK", 2) ;  
+  gsm_command("AT+HTTPPARA=\"UA\",\"" my_user_agent "\"", "OK", 2);  // User agent для http запроса
+// Адрес сервера паракита
+  sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s\" ",settings.http_url,millis(),dex_tx_id,settings.password_code,
+                                                                                                                         dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
+                                                                                                                         Pkt.battery,millis()-catch_time,batteryPercent, batteryMillivolts, 
+                                                                                                                         analogRead(8)-290, lastLocation);         
+  gsm_command(gsm_cmd,"OK",2) ;
+  res1 = gsm_command("AT+HTTPACTION=0", "+HTTPACTION: 0,200,", 60); // Отправляем запрос на сервер
+  gsm_command("AT+HTTPREAD", my_webservice_reply , 20) ;    // Читаем ответ вэб-сервиса
+  gsm_command("AT+HTTPTERM", "OK", 2); // Завершаем http сессию
+  return res1;
+}
+#endif
+
+void print_packet() {
   
 #ifdef GSM-MODEM
   gsm_wake_up(); // Будим GSM-модем
@@ -983,23 +990,14 @@ void print_packet() {
     init_GSM();
   }
   if (gsm_availible) {
-    gsm_get_location(lastLocation);
-    gsm_get_battery(&batteryPercent, &batteryMillivolts);
-    gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
-    gsm_command("AT+HTTPINIT", "OK", 10); // Начинаем http сессию
-    gsm_command("AT+HTTPPARA=\"CID\",1", "OK", 2) ;  
-    gsm_command("AT+HTTPPARA=\"UA\",\"" my_user_agent "\"", "OK", 2);  // User agent для http запроса
-// Адрес сервера паракита
-    sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s\" ",settings.http_url,millis(),dex_tx_id,settings.password_code,
-                                                                                                                           dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
-                                                                                                                           Pkt.battery,millis()-catch_time,batteryPercent, batteryMillivolts, 
-                                                                                                                           analogRead(8)-290, lastLocation);         
-    gsm_command(gsm_cmd,"OK",2) ;
-    gsm_command("AT+HTTPACTION=0", "+HTTPACTION: 0,200,", 60); // Отправляем запрос на сервер
-    gsm_command("AT+HTTPREAD", my_webservice_reply , 20) ;    // Читаем ответ вэб-сервиса
-    gsm_command("AT+HTTPTERM", "OK", 2); // Завершаем http сессию
+    if (!send_gprs_data()) {
+      set_gprs_profile();
+      send_gprs_data();
+    }
+    
   }  
 #endif
+/*
 #ifdef DEBUG
   Serial.print(Pkt.len, HEX);
   Serial.print("\t");
@@ -1028,6 +1026,58 @@ void print_packet() {
   Serial.print(Pkt.LQI2, HEX);
   Serial.println(" OK");
 #endif
+*/
+}
+
+/************************************************************************************************************/
+/*
+    ATtiny85_sleep()
+
+    Puts MCU into the sleep state
+
+    NOTE: There are 6 different sleeps modes:
+          * SLEEP_MODE_IDLE..........The least power savings state. CPU stopped but Analog
+                                     comparator, ADC, USI, Timer/Counter, Watchdog (if enabled),
+                                     & the interrupt system continues operating. (by default in "sleep.h")
+          * SLEEP_MODE_ADC...........ADC Noise Reduction. CPU stopped but the ADC, the external
+                                     interrupts, & the Watchdog (if enabled) continue operating.
+          * SLEEP_MODE_PWR_SAVE......Supported by Atiny25, Atiny45, Atiny85.
+          * SLEEP_MODE_EXT_STANDBY...Not supported by Atiny25, Atiny45, Atiny85.
+          * SLEEP_MODE_STANDBY.......Not supported by Atiny25, Atiny45, Atiny85.
+          * SLEEP_MODE_PWR_DOWN......The most power savings state. All oscillators are stopped, only an
+                                     External Reset, Watchdog Reset, Brown-out Reset, USI start condition
+                                     interupt & external level interrupt on INT0 or a pin change interrupt
+                                     can wake up the MCU.      
+*/
+/************************************************************************************************************/
+void arduino_sleep()
+{
+//  power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
+  /*              
+  power_adc_disable();                 //disable ADC
+  power_timer0_disable();              //disable Timer0
+  power_timer1_disable();              //disable Timer2
+  power_usi_disable();                 //disable the Universal Serial Interface module.
+  */
+//  set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
+  set_sleep_mode(SLEEP_MODE_IDLE); //set the sleep type
+  sleep_mode();                        /*system stops & sleeps here (automatically sets the SE (Sleep Enable) bit
+                                         (so the sleep is possible), goes to sleep, wakes-up from sleep after an
+                                         interrupt (if interrupts are enabled) or WDT timed out (if enabled) and
+                                         clears the SE (Sleep Enable) bit afterwards).
+                                         the sketch will continue from this point after interrupt or WDT timed out
+                                       */
+}
+
+void arduino_wake_up() {
+//  power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
+  /*
+  power_adc_enable();       //enable ADC
+  power_timer0_enable();    //enable Timer0
+  power_timer1_enable();    //enable Timer1
+  power_usi_enable();       //enable the Universal Serial Interface module
+  */
+  delay(5);                 //to settle down the ADC and peripheries
 }
 
 void loop() {
@@ -1035,16 +1085,23 @@ void loop() {
   
   if (next_time != 0) {
 #ifdef DEBUG
-    Serial.print("next_time - ");
+    Serial.print("next_time-");
     Serial.print(next_time);
-    Serial.print(" current_time - ");
+    Serial.print(" cur_time-");
     Serial.print(millis());
-    Serial.print(" interval - ");
+    Serial.print(" int-");
     Serial.println(next_time - millis() - 3000);
 #endif
     current_time = millis();
     if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
-      delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+      watchdog_counter = 0;     //reset watchdog_counter
+      while ((next_time - current_time) > 15000) {
+        arduino_sleep();
+        current_time = millis();
+      }
+      arduino_wake_up();
+//      delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+      
 #ifdef DEBUG
       Serial.println("WakeUp");
 #endif
@@ -1063,7 +1120,6 @@ void loop() {
 #ifdef GSM-MODEM
   if (gsm_availible) {
     gsm_wake_up(); // Будим GSM-модем
-    gsm_command("AT+CNETLIGHT=1", "OK", 2); // Включение мигание мадема
     read_sms(); // Прочитаем полученные смс-ки
     gsm_goto_sleep();
   }  
@@ -1071,5 +1127,16 @@ void loop() {
 
 }
 
+/************************************************************************************************************/
+/*
+    ISR(WDT_vect)
+    
+    Watchdog Interrupt Service (automatically executed when watchdog is timed out)
+*/
+/************************************************************************************************************/
+ISR(WDT_vect)
+{
+  watchdog_counter++;
+}
 
 
