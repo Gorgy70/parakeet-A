@@ -42,7 +42,6 @@
     Used for wake-up MCU from power-down/sleep.
 */
 /************************************************************************************************************/
-#define WDTCR |= _BV(WDIE)
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
@@ -748,22 +747,6 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 
 #endif
 
-/************************************************************************************************************/
-/*
-    setup_watchdog()
-    
-    Sleeps intervals: WDTO_15MS, WDTO_30MS, WDTO_60MS, WDTO_120MS, WDTO_250MS,
-                      WDTO_500MS, WDTO_1S, WDTO_2S, WDTO_4S, WDTO_8S
-    
-    NOTE: The MCU watchdog runs from internal 128kHz clock and continues to work
-          during the deepest sleep modes to provide a wake up source.
-*/
-/************************************************************************************************************/
-void setup_watchdog(byte sleep_time)
-{
-  wdt_enable(sleep_time);
-}
-
 void setup() {
 #ifdef DEBUG
   byte b1;
@@ -802,7 +785,9 @@ void setup() {
   digitalWrite(DTR_PIN, LOW);
   init_GSM();
 #endif
-  setup_watchdog(WDTO_8S); //approximately 8 sec. of sleep
+#ifndef DEBUG
+ setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
+#endif
 }
 
 /*
@@ -1029,6 +1014,12 @@ void print_packet() {
 */
 }
 
+#ifndef DEBUG
+void setup_watchdog(byte sleep_time)
+{
+  wdt_enable(sleep_time);
+}
+
 /************************************************************************************************************/
 /*
     ATtiny85_sleep()
@@ -1052,15 +1043,17 @@ void print_packet() {
 /************************************************************************************************************/
 void arduino_sleep()
 {
-//  power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
+  WDTCSR|= _BV(WDIE);     /* enable interrupts instead of MCU reset when watchdog is timed out
+                             used for wake-up MCU from power-down */
+  power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
   /*              
   power_adc_disable();                 //disable ADC
   power_timer0_disable();              //disable Timer0
   power_timer1_disable();              //disable Timer2
   power_usi_disable();                 //disable the Universal Serial Interface module.
   */
-//  set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
-  set_sleep_mode(SLEEP_MODE_IDLE); //set the sleep type
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
+//  set_sleep_mode(SLEEP_MODE_IDLE); //set the sleep type
   sleep_mode();                        /*system stops & sleeps here (automatically sets the SE (Sleep Enable) bit
                                          (so the sleep is possible), goes to sleep, wakes-up from sleep after an
                                          interrupt (if interrupts are enabled) or WDT timed out (if enabled) and
@@ -1070,7 +1063,8 @@ void arduino_sleep()
 }
 
 void arduino_wake_up() {
-//  power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
+  wdt_disable(); // Выключим строжевого пса
+  power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
   /*
   power_adc_enable();       //enable ADC
   power_timer0_enable();    //enable Timer0
@@ -1079,9 +1073,11 @@ void arduino_wake_up() {
   */
   delay(5);                 //to settle down the ADC and peripheries
 }
+#endif
 
 void loop() {
   unsigned long current_time;
+  unsigned long watchdog_counter_max;
   
   if (next_time != 0) {
 #ifdef DEBUG
@@ -1094,13 +1090,19 @@ void loop() {
 #endif
     current_time = millis();
     if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
+#ifdef DEBUG
+      delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+#else      
       watchdog_counter = 0;     //reset watchdog_counter
-      while ((next_time - current_time) > 15000) {
+      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
+//      while ((next_time - current_time) > 15000) 
+      while (watchdog_counter < watchdog_counter_max) 
+      {
         arduino_sleep();
-        current_time = millis();
+//        current_time = millis();
       }
       arduino_wake_up();
-//      delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+#endif
       
 #ifdef DEBUG
       Serial.println("WakeUp");
