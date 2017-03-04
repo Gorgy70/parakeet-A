@@ -1,11 +1,20 @@
 //#define DEBUG
 #define GSM-MODEM
 //#define BLINK-LED
+//#define ARDUINO-SLEEP
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include "cc2500_REG.h"
+
+#ifdef ARDUINO-SLEEP
+#include <avr/sleep.h>     //AVR MCU power management.
+#include <avr/power.h>     //AVR MCU peripheries (Analog comparator, ADC, USI, Timers/Counters etc) management.
+#include <avr/wdt.h>       //AVR MCU watchdog timer management.
+#include <avr/io.h>        //AVR MCU IO ports management.
+#include <avr/interrupt.h> //AVR MCU interrupt flags management.
+#endif
 
 #define GDO0_PIN 4            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
 #define DTR_PIN  5            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
@@ -28,6 +37,15 @@
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
 #define my_password_code  "12354"
+
+/************************************************************************************************************/
+/*
+    Constants
+
+    Enables interrupts (instead of MCU reset), when watchdog is timed out.
+    Used for wake-up MCU from power-down/sleep.
+*/
+/************************************************************************************************************/
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
@@ -64,6 +82,8 @@ boolean gsm_availible = false; // Доступность связи GSM
 boolean modem_availible = false; // Доступность модема на порту
 char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения данных их последовательного порта
 char gsm_cmd[GSM_BUUFER_LEN]; // Буффер для формирования GSM команд
+
+volatile long watchdog_counter;
 
 // Коды ошибок мигают лампочкой в двоичной системе
 // 1 (0001) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
@@ -297,7 +317,7 @@ char SendStrobe(char strobe)
   return result;
 }
 
-void init_CC2500_2() {
+void init_CC2500() {
 //FSCTRL1 and MDMCFG4 have the biggest impact on sensitivity...
    
    WriteReg(PATABLE, 0x00);
@@ -355,60 +375,6 @@ void init_CC2500_2() {
    WriteReg(BSCFG, 0x6C);
  
 }
-
-/*
-void init_CC2500() {
-
-  SendStrobe(SRES);       // software reset for CC2500
-  WriteReg(IOCFG0, 0x06);
-  WriteReg(SYNC1, 0xD3);
-  WriteReg(SYNC0, 0x91);
-
-  WriteReg(PKTCTRL1, 0x0C); // CRC_AUTOFLUSH = 1 & APPEND_STATUS = 1
-  //  WriteReg(PKTCTRL1,0x04);
-  WriteReg(PKTCTRL0, 0x05);
-
-  WriteReg(FSCTRL1, 0x08);
-  WriteReg(FSCTRL0, 0x00);
-
-  WriteReg(FREQ2, 0x5D);
-  WriteReg(FREQ1, 0x44);
-  WriteReg(FREQ0, 0xEB);
-
-  WriteReg(MDMCFG4, 0x4A);
-  WriteReg(MDMCFG3, 0xF8);
-  WriteReg(MDMCFG2, 0x73);
-  WriteReg(MDMCFG1, 0x03);
-  WriteReg(MDMCFG0, 0x3B);
-
-  WriteReg(DEVIATN, 0x00);
-
-  WriteReg(MCSM0, 0x18);
-
-  WriteReg(FOCCFG, 0x16);
-
-  WriteReg(BSCFG, 0x6C);
-
-  WriteReg(AGCCTRL2, 0x03);
-  WriteReg(AGCCTRL1, 0x40);
-  WriteReg(AGCCTRL0, 0x91);
-
-  WriteReg(FREND1, 0x56);
-  WriteReg(FREND0, 0x10);
-
-  WriteReg(FSCAL3, 0xA9);
-  WriteReg(FSCAL2, 0x0A);
-  WriteReg(FSCAL1, 0x00);
-  WriteReg(FSCAL0, 0x11);
-
-  WriteReg(TEST2, 0x88);
-  WriteReg(TEST1, 0x31);
-  WriteReg(TEST0, 0x0B);
-
-  WriteReg(MCSM0, 0x14);   // Auto-calibrate when going from idle to RX or TX.
-  WriteReg(MCSM1, 0x00);   // Disable CCA.  After RX, go to IDLE.  After TX, go to IDLE.
-}
-*/
 
 char ReadReg(char addr) {
   addr = addr + 0x80;
@@ -808,8 +774,7 @@ void setup() {
   //  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
   digitalWrite(SS, HIGH);
 
-//  init_CC2500();  // initialise CC2500 registers
-  init_CC2500_2();  // initialise CC2500 registers
+  init_CC2500();  // initialise CC2500 registers
 #ifdef DEBUG
   Serial.print("CC2500 PARTNUM=");
   b1 = ReadStatus(PARTNUM);
@@ -823,6 +788,9 @@ void setup() {
 #ifdef GSM-MODEM
   digitalWrite(DTR_PIN, LOW);
   init_GSM();
+#endif
+#ifndef DEBUG
+ setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
 #endif
 }
 
@@ -1050,8 +1018,70 @@ void print_packet() {
 */
 }
 
+#ifdef ARDUINO-SLEEP
+void setup_watchdog(byte sleep_time)
+{
+  wdt_enable(sleep_time);
+}
+
+/************************************************************************************************************/
+/*
+    ATtiny85_sleep()
+
+    Puts MCU into the sleep state
+
+    NOTE: There are 6 different sleeps modes:
+          * SLEEP_MODE_IDLE..........The least power savings state. CPU stopped but Analog
+                                     comparator, ADC, USI, Timer/Counter, Watchdog (if enabled),
+                                     & the interrupt system continues operating. (by default in "sleep.h")
+          * SLEEP_MODE_ADC...........ADC Noise Reduction. CPU stopped but the ADC, the external
+                                     interrupts, & the Watchdog (if enabled) continue operating.
+          * SLEEP_MODE_PWR_SAVE......Supported by Atiny25, Atiny45, Atiny85.
+          * SLEEP_MODE_EXT_STANDBY...Not supported by Atiny25, Atiny45, Atiny85.
+          * SLEEP_MODE_STANDBY.......Not supported by Atiny25, Atiny45, Atiny85.
+          * SLEEP_MODE_PWR_DOWN......The most power savings state. All oscillators are stopped, only an
+                                     External Reset, Watchdog Reset, Brown-out Reset, USI start condition
+                                     interupt & external level interrupt on INT0 or a pin change interrupt
+                                     can wake up the MCU.      
+*/
+/************************************************************************************************************/
+void arduino_sleep()
+{
+  WDTCSR|= _BV(WDIE);     /* enable interrupts instead of MCU reset when watchdog is timed out
+                             used for wake-up MCU from power-down */
+  power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
+  /*              
+  power_adc_disable();                 //disable ADC
+  power_timer0_disable();              //disable Timer0
+  power_timer1_disable();              //disable Timer2
+  power_usi_disable();                 //disable the Universal Serial Interface module.
+  */
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
+//  set_sleep_mode(SLEEP_MODE_IDLE); //set the sleep type
+  sleep_mode();                        /*system stops & sleeps here (automatically sets the SE (Sleep Enable) bit
+                                         (so the sleep is possible), goes to sleep, wakes-up from sleep after an
+                                         interrupt (if interrupts are enabled) or WDT timed out (if enabled) and
+                                         clears the SE (Sleep Enable) bit afterwards).
+                                         the sketch will continue from this point after interrupt or WDT timed out
+                                       */
+}
+
+void arduino_wake_up() {
+  wdt_disable(); // Выключим строжевого пса
+  power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
+  /*
+  power_adc_enable();       //enable ADC
+  power_timer0_enable();    //enable Timer0
+  power_timer1_enable();    //enable Timer1
+  power_usi_enable();       //enable the Universal Serial Interface module
+  */
+  delay(5);                 //to settle down the ADC and peripheries
+}
+#endif
+
 void loop() {
   unsigned long current_time;
+  unsigned long watchdog_counter_max;
   
   if (next_time != 0) {
 #ifdef DEBUG
@@ -1064,7 +1094,20 @@ void loop() {
 #endif
     current_time = millis();
     if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
+#ifdef ARDUINO-SLEEP
+      watchdog_counter = 0;     //reset watchdog_counter
+      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
+//      while ((next_time - current_time) > 15000) 
+      while (watchdog_counter < watchdog_counter_max) 
+      {
+        arduino_sleep();
+//        current_time = millis();
+      }
+      arduino_wake_up();
+#else      
       delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
+#endif
+      
 #ifdef DEBUG
       Serial.println("WakeUp");
 #endif
@@ -1090,5 +1133,16 @@ void loop() {
 
 }
 
+/************************************************************************************************************/
+/*
+    ISR(WDT_vect)
+    
+    Watchdog Interrupt Service (automatically executed when watchdog is timed out)
+*/
+/************************************************************************************************************/
+ISR(WDT_vect)
+{
+  watchdog_counter++;
+}
 
 
