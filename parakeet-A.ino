@@ -1,7 +1,7 @@
 //#define DEBUG
 #define GSM-MODEM
 //#define BLINK-LED
-//#define ARDUINO-SLEEP
+#define ARDUINO-SLEEP
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
@@ -37,15 +37,6 @@
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
 #define my_password_code  "12354"
-
-/************************************************************************************************************/
-/*
-    Constants
-
-    Enables interrupts (instead of MCU reset), when watchdog is timed out.
-    Used for wake-up MCU from power-down/sleep.
-*/
-/************************************************************************************************************/
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
@@ -419,7 +410,8 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   else {
     ret = false;
   }  
-//  memset (SerialBuffer,0,sizeof(SerialBuffer));
+  memset (&SerialBuffer,0,sizeof(SerialBuffer));
+//  memset (&settings, 0, sizeof (settings));
 //  mySerial.write(command);
 //  mySerial.write("\r\n"); // enter key
   mySerial.println(command);
@@ -448,11 +440,11 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   }
   SerialBuffer[loop] = '\0';
 #ifdef DEBUG
-  Serial.print("Command=");
+  Serial.print("Cmd=");
   Serial.println(command);
-  Serial.print("Exp. response=");
+  Serial.print("Exp.rep=");
   Serial.println(response);
-  Serial.print("Response=");
+  Serial.print("Resp=");
   Serial.println(SerialBuffer);
   Serial.print("Res=");
   Serial.println(ret);
@@ -789,9 +781,6 @@ void setup() {
   digitalWrite(DTR_PIN, LOW);
   init_GSM();
 #endif
-#ifndef DEBUG
- setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
-#endif
 }
 
 /*
@@ -1095,6 +1084,7 @@ void loop() {
     current_time = millis();
     if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
 #ifdef ARDUINO-SLEEP
+      setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
       watchdog_counter = 0;     //reset watchdog_counter
       watchdog_counter_max = (next_time - current_time - 15000) / 8000;
 //      while ((next_time - current_time) > 15000) 
