@@ -598,6 +598,7 @@ void gsm_goto_sleep() {
 //  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
 //  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   gsm_command("AT+CNETLIGHT=0", "OK", 2); // Отключаем мигание модема
+  delay(GSM_DELAY);
   digitalWrite(DTR_PIN, HIGH);
 }
 
@@ -691,8 +692,6 @@ void gsm_get_location(char *location) {
         strncpy(&location[i3-i2-1],&SerialBuffer[i1],i2-i1);
         location[i3-i1-1] = '\0';
       }
-//      sscanf(&SerialBuffer[16],"%d.%lu,%d.%lu,",&longitudeMajor,&longitudeMinor,&latitudeMajor,&latitudeMinor);
-//      sprintf(location,"%d.%lu,%d.%lu",latitudeMajor,latitudeMinor,longitudeMajor,longitudeMinor);      
 #ifdef DEBUG
       Serial.print("Location = ");
       Serial.println(location);
@@ -803,7 +802,7 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
   }
 }
 
-void ReadRadioBuffer() {
+byte ReadRadioBuffer() {
   byte len;
   byte i;
   byte rxbytes;
@@ -826,6 +825,7 @@ void ReadRadioBuffer() {
   Serial.print("Dexcom ID: ");
   Serial.println(Pkt.src_addr);
 #endif
+  return len;
 }
 
 boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
@@ -834,6 +834,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
   unsigned long current_time;
   boolean nRet = false;
   boolean packet_on_board;
+  byte packet_len;
 
   start_time = millis();
   swap_channel(nChannels[channel_index], fOffset[channel_index]);
@@ -849,7 +850,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
     if (milliseconds_wait != 0 && current_time - start_time > milliseconds_wait) {
       break; // Если превысыли время ожидания на канале - выход
     }
-    if (channel_index == 0 && next_time != 0 && current_time > next_time + wait_after_time) {
+    if (channel_index == 0 && next_time != 0 && current_time > (next_time + wait_after_time)) {
       break; // Если превысыли время следующего пакета на канале 0 - выход
     }
 #ifdef BLINK-LED
@@ -861,7 +862,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
       // Идет прием пакета
     }
     if (packet_on_board) {
-      ReadRadioBuffer();
+      packet_len = ReadRadioBuffer();
       if (Pkt.src_addr == dex_tx_id) {
 #ifdef DEBUG
         Serial.print("Catched.Ch=");
@@ -879,7 +880,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
         nRet = true;
       } 
 //      if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
-      if (next_time != 0 && !nRet) {
+      if (next_time != 0 && !nRet && packet_len != 0) {
 #ifdef DEBUG
         Serial.print("Try.Ch=");
         Serial.print(nChannels[channel_index]);
@@ -1036,15 +1037,11 @@ void setup_watchdog(byte sleep_time)
 /************************************************************************************************************/
 void arduino_sleep()
 {
+  setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
   WDTCSR|= _BV(WDIE);     /* enable interrupts instead of MCU reset when watchdog is timed out
                              used for wake-up MCU from power-down */
   power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
-  /*              
-  power_adc_disable();                 //disable ADC
-  power_timer0_disable();              //disable Timer0
-  power_timer1_disable();              //disable Timer2
-  power_usi_disable();                 //disable the Universal Serial Interface module.
-  */
+  
   set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
 //  set_sleep_mode(SLEEP_MODE_IDLE); //set the sleep type
   sleep_mode();                        /*system stops & sleeps here (automatically sets the SE (Sleep Enable) bit
@@ -1058,12 +1055,6 @@ void arduino_sleep()
 void arduino_wake_up() {
   wdt_disable(); // Выключим строжевого пса
   power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
-  /*
-  power_adc_enable();       //enable ADC
-  power_timer0_enable();    //enable Timer0
-  power_timer1_enable();    //enable Timer1
-  power_usi_enable();       //enable the Universal Serial Interface module
-  */
   delay(5);                 //to settle down the ADC and peripheries
 }
 #endif
@@ -1084,10 +1075,9 @@ void loop() {
     current_time = millis();
     if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
 #ifdef ARDUINO-SLEEP
-      setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
       watchdog_counter = 0;     //reset watchdog_counter
-      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
-//      while ((next_time - current_time) > 15000) 
+//      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
+      watchdog_counter_max = ((next_time - current_time) / 9000) - 2;
       while (watchdog_counter < watchdog_counter_max) 
       {
         arduino_sleep();
