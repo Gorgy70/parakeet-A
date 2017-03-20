@@ -1,21 +1,33 @@
 //#define DEBUG
-#define GSM-MODEM
-//#define BLINK-LED
+#define GSM_MODEM
+//#define INT_BLINK_LED
+#define ARDUINO_SLEEP
+//#define ARDUINO_DELAY
+#define EXT_BLINK_LED
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include "cc2500_REG.h"
+
+#ifdef ARDUINO_SLEEP
 #include <avr/sleep.h>     //AVR MCU power management.
 #include <avr/power.h>     //AVR MCU peripheries (Analog comparator, ADC, USI, Timers/Counters etc) management.
 #include <avr/wdt.h>       //AVR MCU watchdog timer management.
 #include <avr/io.h>        //AVR MCU IO ports management.
 #include <avr/interrupt.h> //AVR MCU interrupt flags management.
+#endif
 
-#define GDO0_PIN 4            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
-#define DTR_PIN  5            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
+#define GDO0_PIN 3            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#define DTR_PIN  2            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
 #define TX_PIN   8            // Tx контакт для последовательного порта
 #define RX_PIN   9            // Rx контакт для последовательного порта
+#ifdef EXT_BLINK_LED
+#define RED_LED_PIN 5
+#define YELLOW_LED_PIN 4
+#endif
+
+
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
 #define FIVE_MINUTE 300000    // 5 минут
 
@@ -33,15 +45,6 @@
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
 #define my_password_code  "12354"
-
-/************************************************************************************************************/
-/*
-    Constants
-
-    Enables interrupts (instead of MCU reset), when watchdog is timed out.
-    Used for wake-up MCU from power-down/sleep.
-*/
-/************************************************************************************************************/
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
@@ -195,7 +198,32 @@ unsigned long dex_num_decoder (unsigned int usShortFloat)
     return usMantissa << usExponent;
 }
 
-#ifdef BLINK-LED
+#ifdef EXT_BLINK_LED
+void blink_sequence_red(const char *sequence) {
+  byte i;
+
+  digitalWrite(RED_LED_PIN, LOW);
+  delay(500); 
+  for (i = 0; i < strlen(sequence); i++) {
+    digitalWrite(RED_LED_PIN, HIGH);
+    switch (sequence[i]) {
+      case '0': 
+        delay(500);
+        break;
+      case '1': 
+        delay(1000);
+        break;
+      default:
+        delay(2000);
+        break;
+    }
+    digitalWrite(RED_LED_PIN, LOW);
+    delay(500); 
+  }  
+}
+#endif
+
+#ifdef INT_BLINK_LED
 void blink_sequence(const char *sequence) {
   byte i;
 
@@ -260,8 +288,11 @@ void loadSettingsFromFlash()
     Serial.println("Settings checksum error. Load defaults");
 #endif
     clearSettings();
-#ifdef BLINK-LED
+#ifdef INT_BLINK_LED
     blink_sequence("0001");
+#endif
+#ifdef EXT_BLINK_LED
+    blink_sequence_red("0001");
 #endif
   }
 #ifdef DEBUG
@@ -270,7 +301,7 @@ void loadSettingsFromFlash()
 #endif
 }
 
-#ifdef BLINK-LED
+#ifdef INT_BLINK_LED
 void blink_builtin_led_quarter() {  // Blink quarter seconds
   if ((millis() / 250) % 2) {
     digitalWrite(LED_BUILTIN, HIGH);
@@ -286,6 +317,44 @@ void blink_builtin_led_half() {  // Blink half seconds
   } else
   {
     digitalWrite(LED_BUILTIN, LOW);
+  }
+}
+#endif
+
+#ifdef EXT_BLINK_LED
+void blink_yellow_led_quarter() {  // Blink quarter seconds
+  if ((millis() / 250) % 2) {
+    digitalWrite(YELLOW_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(YELLOW_LED_PIN, LOW);
+  }
+}
+
+void blink_yellow_led_half() {  // Blink half seconds
+  if ((millis() / 500) % 2) {
+    digitalWrite(YELLOW_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(YELLOW_LED_PIN, LOW);
+  }
+}
+
+void blink_red_led_quarter() {  // Blink quarter seconds
+  if ((millis() / 250) % 2) {
+    digitalWrite(RED_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, LOW);
+  }
+}
+
+void blink_red_led_half() {  // Blink half seconds
+  if ((millis() / 500) % 2) {
+    digitalWrite(RED_LED_PIN, HIGH);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, LOW);
   }
 }
 #endif
@@ -398,15 +467,18 @@ char ReadStatus(char addr) {
 
 void(* resetFunc) (void) = 0; // объявляем функцию reset 
 
-#ifdef GSM-MODEM
+#ifdef GSM_MODEM
 boolean gsm_command(const char *command, const char *response, int timeout) {
   boolean ret;
   unsigned long timeout_time; 
   int len = strlen (response);
   int loop = 0;
 
-#ifdef BLINK-LED  
+#ifdef INT_BLINK_LED  
   digitalWrite(LED_BUILTIN, HIGH);
+#endif
+#ifdef EXT_BLINK_LED  
+  digitalWrite(RED_LED_PIN, HIGH);
 #endif
 
   if (len == 0) {
@@ -415,7 +487,8 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   else {
     ret = false;
   }  
-//  memset (SerialBuffer,0,sizeof(SerialBuffer));
+  memset (&SerialBuffer,0,sizeof(SerialBuffer));
+//  memset (&settings, 0, sizeof (settings));
 //  mySerial.write(command);
 //  mySerial.write("\r\n"); // enter key
   mySerial.println(command);
@@ -444,17 +517,20 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   }
   SerialBuffer[loop] = '\0';
 #ifdef DEBUG
-  Serial.print("Command=");
+  Serial.print("Cmd=");
   Serial.println(command);
-  Serial.print("Exp. response=");
+  Serial.print("Exp.rep=");
   Serial.println(response);
-  Serial.print("Response=");
+  Serial.print("Resp=");
   Serial.println(SerialBuffer);
   Serial.print("Res=");
   Serial.println(ret);
 #endif
-#ifdef BLINK-LED  
+#ifdef INT_BLINK_LED  
   digitalWrite(LED_BUILTIN, LOW);
+#endif
+#ifdef EXT_BLINK_LED  
+  digitalWrite(RED_LED_PIN, LOW);
 #endif
   return ret;
 }
@@ -602,6 +678,7 @@ void gsm_goto_sleep() {
 //  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
 //  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   gsm_command("AT+CNETLIGHT=0", "OK", 2); // Отключаем мигание модема
+  delay(GSM_DELAY);
   digitalWrite(DTR_PIN, HIGH);
 }
 
@@ -627,8 +704,11 @@ boolean init_gsm_modem()
         mySerial.write(27);
         delay(300);
         if (!gsm_command("AT","OK",2)) {
-#ifdef BLINK-LED
+#ifdef INT_BLINK_LED
           blink_sequence("0010");
+#endif
+#ifdef EXT_BLINK_LED
+          blink_sequence_red("0010");
 #endif
           return false;
         }
@@ -661,8 +741,11 @@ void init_GSM() {
     gsm_goto_sleep();
   }  
   else {
-#ifdef BLINK-LED
+#ifdef INT_BLINK_LED
     blink_sequence("0011");
+#endif
+#ifdef EXT_BLINK_LED
+    blink_sequence_red("0011");
 #endif
   }
 }
@@ -695,8 +778,6 @@ void gsm_get_location(char *location) {
         strncpy(&location[i3-i2-1],&SerialBuffer[i1],i2-i1);
         location[i3-i1-1] = '\0';
       }
-//      sscanf(&SerialBuffer[16],"%d.%lu,%d.%lu,",&longitudeMajor,&longitudeMinor,&latitudeMajor,&latitudeMinor);
-//      sprintf(location,"%d.%lu,%d.%lu",latitudeMajor,latitudeMinor,longitudeMajor,longitudeMinor);      
 #ifdef DEBUG
       Serial.print("Location = ");
       Serial.println(location);
@@ -762,8 +843,12 @@ void setup() {
   }
 #endif
   // initialize digital pin LED_BUILTIN as an output.
-#ifdef BLINK-LED
+#ifdef INT_BLINK_LED
   pinMode(LED_BUILTIN, OUTPUT);
+#endif
+#ifdef EXT_BLINK_LED
+  pinMode(RED_LED_PIN, OUTPUT);
+  pinMode(YELLOW_LED_PIN, OUTPUT);
 #endif
 
   SPI.begin();
@@ -781,12 +866,9 @@ void setup() {
 #endif
   mySerial.begin(9600);
   loadSettingsFromFlash(); 
-#ifdef GSM-MODEM
+#ifdef GSM_MODEM
   digitalWrite(DTR_PIN, LOW);
   init_GSM();
-#endif
-#ifndef DEBUG
- setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
 #endif
 }
 
@@ -810,7 +892,7 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
   }
 }
 
-void ReadRadioBuffer() {
+byte ReadRadioBuffer() {
   byte len;
   byte i;
   byte rxbytes;
@@ -833,6 +915,7 @@ void ReadRadioBuffer() {
   Serial.print("Dexcom ID: ");
   Serial.println(Pkt.src_addr);
 #endif
+  return len;
 }
 
 boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
@@ -841,6 +924,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
   unsigned long current_time;
   boolean nRet = false;
   boolean packet_on_board;
+  byte packet_len;
 
   start_time = millis();
   swap_channel(nChannels[channel_index], fOffset[channel_index]);
@@ -848,19 +932,24 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 #ifdef DEBUG
   Serial.print("Ch=");
   Serial.print(nChannels[channel_index]);
-  Serial.print(" Time=");
-  Serial.println(start_time);
+  Serial.print(" Tm=");
+  Serial.print(start_time);
+  Serial.print(" N Tm=");
+  Serial.println(next_time);
 #endif
   while (true) {
     current_time = millis();
     if (milliseconds_wait != 0 && current_time - start_time > milliseconds_wait) {
       break; // Если превысыли время ожидания на канале - выход
     }
-    if (channel_index == 0 && next_time != 0 && current_time > next_time + wait_after_time) {
+    if (channel_index == 0 && next_time != 0 && current_time > (next_time + wait_after_time)) {
       break; // Если превысыли время следующего пакета на канале 0 - выход
     }
-#ifdef BLINK-LED
+#ifdef INT_BLINK_LED
     blink_builtin_led_quarter();
+#endif
+#ifdef EXT_BLINK_LED
+    blink_yellow_led_quarter();
 #endif
     packet_on_board = false;
     while (digitalRead(GDO0_PIN) == HIGH) {
@@ -868,7 +957,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
       // Идет прием пакета
     }
     if (packet_on_board) {
-      ReadRadioBuffer();
+      packet_len = ReadRadioBuffer();
       if (Pkt.src_addr == dex_tx_id) {
 #ifdef DEBUG
         Serial.print("Catched.Ch=");
@@ -886,7 +975,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
         nRet = true;
       } 
 //      if (next_time != 0 && !nRet && channel_index == 0 && current_time < next_time && next_time-current_time < 2000) {
-      if (next_time != 0 && !nRet) {
+      if (next_time != 0 && !nRet && packet_len != 0) {
 #ifdef DEBUG
         Serial.print("Try.Ch=");
         Serial.print(nChannels[channel_index]);
@@ -901,7 +990,12 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
     }
   }
 
+#ifdef INT_BLINK_LED
   digitalWrite(LED_BUILTIN, LOW);
+#endif
+#ifdef EXT_BLINK_LED
+  digitalWrite(YELLOW_LED_PIN, LOW);
+#endif
   return nRet;
 }
 
@@ -926,7 +1020,7 @@ boolean get_packet (void) {
     if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
       next_time = 0;
       sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
-    }
+    }  
   }
   else {
     next_time = catch_time; 
@@ -941,7 +1035,7 @@ boolean get_packet (void) {
   return nRet;
 }
 
-#ifdef GSM-MODEM
+#ifdef GSM_MODEM
 boolean send_gprs_data() {
   char lastLocation[30];  
   byte batteryPercent = 0;
@@ -969,7 +1063,7 @@ boolean send_gprs_data() {
 
 void print_packet() {
   
-#ifdef GSM-MODEM
+#ifdef GSM_MODEM
   gsm_wake_up(); // Будим GSM-модем
   if (!gsm_availible) {
     init_GSM();
@@ -1014,7 +1108,7 @@ void print_packet() {
 */
 }
 
-#ifndef DEBUG
+#ifdef ARDUINO_SLEEP
 void setup_watchdog(byte sleep_time)
 {
   wdt_enable(sleep_time);
@@ -1043,17 +1137,13 @@ void setup_watchdog(byte sleep_time)
 /************************************************************************************************************/
 void arduino_sleep()
 {
+  setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
   WDTCSR|= _BV(WDIE);     /* enable interrupts instead of MCU reset when watchdog is timed out
                              used for wake-up MCU from power-down */
   power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
-  /*              
-  power_adc_disable();                 //disable ADC
-  power_timer0_disable();              //disable Timer0
-  power_timer1_disable();              //disable Timer2
-  power_usi_disable();                 //disable the Universal Serial Interface module.
-  */
+  
   set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
-//  set_sleep_mode(SLEEP_MODE_IDLE); //set the sleep type
+//  set_sleep_mode(SLEEP_MODE_PWR_SAVE); //set the sleep type
   sleep_mode();                        /*system stops & sleeps here (automatically sets the SE (Sleep Enable) bit
                                          (so the sleep is possible), goes to sleep, wakes-up from sleep after an
                                          interrupt (if interrupts are enabled) or WDT timed out (if enabled) and
@@ -1065,12 +1155,6 @@ void arduino_sleep()
 void arduino_wake_up() {
   wdt_disable(); // Выключим строжевого пса
   power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
-  /*
-  power_adc_enable();       //enable ADC
-  power_timer0_enable();    //enable Timer0
-  power_timer1_enable();    //enable Timer1
-  power_usi_enable();       //enable the Universal Serial Interface module
-  */
   delay(5);                 //to settle down the ADC and peripheries
 }
 #endif
@@ -1081,27 +1165,45 @@ void loop() {
   
   if (next_time != 0) {
 #ifdef DEBUG
-    Serial.print("next_time-");
+    Serial.print("n_tm-");
     Serial.print(next_time);
-    Serial.print(" cur_time-");
+    Serial.print(" c_tm-");
     Serial.print(millis());
     Serial.print(" int-");
     Serial.println(next_time - millis() - 3000);
 #endif
     current_time = millis();
     if  (next_time > current_time && (next_time - current_time) < FIVE_MINUTE)  {
+#ifdef ARDUINO_SLEEP
 #ifdef DEBUG
-      delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
-#else      
+      Serial.println("Sleep");
+      Serial.print(" c_tm-");
+      Serial.println(millis());
+#endif
       watchdog_counter = 0;     //reset watchdog_counter
-      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
-//      while ((next_time - current_time) > 15000) 
+//      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
+      watchdog_counter_max = ((next_time - current_time) / 10000);
+//      watchdog_counter_max -= 2;
+//      next_time =- 8000*watchdog_counter_max;
+      next_time = 0;
+#ifdef DEBUG
+      Serial.print("cnt-");
+      Serial.println(watchdog_counter_max);
+      delay(200);
+#endif
       while (watchdog_counter < watchdog_counter_max) 
       {
         arduino_sleep();
 //        current_time = millis();
       }
       arduino_wake_up();
+#endif
+
+#ifdef ARDUINO_DELAY
+#ifdef DEBUG
+      Serial.println("Delay");
+#endif
+      delay(next_time - current_time - 2000); // Можно спать до следующего пакета. С режимом сна будем разбираться позже
 #endif
       
 #ifdef DEBUG
@@ -1119,7 +1221,7 @@ void loop() {
   {
     print_packet ();
   }
-#ifdef GSM-MODEM
+#ifdef GSM_MODEM
   if (gsm_availible) {
     gsm_wake_up(); // Будим GSM-модем
     read_sms(); // Прочитаем полученные смс-ки
