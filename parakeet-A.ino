@@ -81,6 +81,7 @@ boolean gsm_availible = false; // Доступность связи GSM
 boolean modem_availible = false; // Доступность модема на порту
 char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения данных их последовательного порта
 char gsm_cmd[GSM_BUUFER_LEN]; // Буффер для формирования GSM команд
+boolean low_battery = false;
 
 volatile long watchdog_counter;
 
@@ -202,6 +203,7 @@ unsigned long dex_num_decoder (unsigned int usShortFloat)
 void blink_sequence_red(const char *sequence) {
   byte i;
 
+  digitalWrite(YELLOW_LED_PIN, HIGH);
   digitalWrite(RED_LED_PIN, LOW);
   delay(500); 
   for (i = 0; i < strlen(sequence); i++) {
@@ -220,6 +222,7 @@ void blink_sequence_red(const char *sequence) {
     digitalWrite(RED_LED_PIN, LOW);
     delay(500); 
   }  
+  digitalWrite(YELLOW_LED_PIN, LOW);
 }
 #endif
 
@@ -884,7 +887,7 @@ void swap_channel(unsigned long channel, byte newFSCTRL0) {
 
   SendStrobe(SIDLE);
   SendStrobe(SFRX);
-  WriteReg(FSCTRL0,newFSCTRL0);
+//  WriteReg(FSCTRL0,newFSCTRL0);
   WriteReg(CHANNR, channel);
   SendStrobe(SRX);  //RX
   while (ReadStatus(MARCSTATE) != 0x0d) {
@@ -950,6 +953,9 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 #endif
 #ifdef EXT_BLINK_LED
     blink_yellow_led_quarter();
+    if (low_battery) {
+      blink_red_led_half();
+    }
 #endif
     packet_on_board = false;
     while (digitalRead(GDO0_PIN) == HIGH) {
@@ -1044,6 +1050,13 @@ boolean send_gprs_data() {
 
   gsm_get_location(lastLocation);
   gsm_get_battery(&batteryPercent, &batteryMillivolts);
+  if (batteryPercent > 0 && batteryPercent < 30)
+  {
+    low_battery = true;
+  } else
+  {
+    low_battery = true;   
+  }
   gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
   gsm_command("AT+HTTPINIT", "OK", 10); // Начинаем http сессию
   gsm_command("AT+HTTPPARA=\"CID\",1", "OK", 2) ;  
@@ -1135,15 +1148,16 @@ void setup_watchdog(byte sleep_time)
                                      can wake up the MCU.      
 */
 /************************************************************************************************************/
-void arduino_sleep()
+void arduino_sleep(byte sleep_time)
 {
-  setup_watchdog(WDTO_8S); // Максимальное время сна контроллера
+  setup_watchdog(sleep_time); // Максимальное время сна контроллера
   WDTCSR|= _BV(WDIE);     /* enable interrupts instead of MCU reset when watchdog is timed out
                              used for wake-up MCU from power-down */
   power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
   
   set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
 //  set_sleep_mode(SLEEP_MODE_PWR_SAVE); //set the sleep type
+//  set_sleep_mode(SLEEP_MODE_STANDBY); //set the sleep type
   sleep_mode();                        /*system stops & sleeps here (automatically sets the SE (Sleep Enable) bit
                                          (so the sleep is possible), goes to sleep, wakes-up from sleep after an
                                          interrupt (if interrupts are enabled) or WDT timed out (if enabled) and
@@ -1183,7 +1197,7 @@ void loop() {
       watchdog_counter = 0;     //reset watchdog_counter
 //      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
       watchdog_counter_max = ((next_time - current_time) / 10000);
-//      watchdog_counter_max -= 2;
+      watchdog_counter_max -= 1;
 //      next_time =- 8000*watchdog_counter_max;
       next_time = 0;
 #ifdef DEBUG
@@ -1193,9 +1207,10 @@ void loop() {
 #endif
       while (watchdog_counter < watchdog_counter_max) 
       {
-        arduino_sleep();
+        arduino_sleep(WDTO_8S);
 //        current_time = millis();
       }
+      arduino_sleep(WDTO_4S);
       arduino_wake_up();
 #endif
 
