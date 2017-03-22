@@ -1001,6 +1001,7 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
 #endif
 #ifdef EXT_BLINK_LED
   digitalWrite(YELLOW_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
 #endif
   return nRet;
 }
@@ -1055,7 +1056,7 @@ boolean send_gprs_data() {
     low_battery = true;
   } else
   {
-    low_battery = true;   
+    low_battery = false;   
   }
   gsm_command("AT+HTTPTERM", "OK", 2); // Завершить сессию на вскяий случай
   gsm_command("AT+HTTPINIT", "OK", 10); // Начинаем http сессию
