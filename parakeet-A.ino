@@ -352,12 +352,30 @@ void blink_red_led_quarter() {  // Blink quarter seconds
   }
 }
 
+void blink_red_led_quarter2() {  // Blink quarter seconds
+  if ((millis() / 250) % 2) {
+    digitalWrite(RED_LED_PIN, LOW);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, HIGH);
+  }
+}
+
 void blink_red_led_half() {  // Blink half seconds
   if ((millis() / 500) % 2) {
     digitalWrite(RED_LED_PIN, HIGH);
   } else
   {
     digitalWrite(RED_LED_PIN, LOW);
+  }
+}
+
+void blink_red_led_half2() {  // Blink half seconds
+  if ((millis() / 500) % 2) {
+    digitalWrite(RED_LED_PIN, LOW);
+  } else
+  {
+    digitalWrite(RED_LED_PIN, HIGH);
   }
 }
 #endif
@@ -952,10 +970,19 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
     blink_builtin_led_quarter();
 #endif
 #ifdef EXT_BLINK_LED
-    blink_yellow_led_quarter();
-    if (low_battery) {
-      blink_red_led_half();
-    }
+    if (dex_tx_id == 10858926)   // ABCDE
+    {
+      blink_yellow_led_half();
+      if (low_battery) {
+        blink_red_led_half2();
+      }
+    } else
+    {
+      blink_yellow_led_quarter();
+      if (low_battery) {
+        blink_red_led_quarter2();
+      }
+    }  
 #endif
     packet_on_board = false;
     while (digitalRead(GDO0_PIN) == HIGH) {
