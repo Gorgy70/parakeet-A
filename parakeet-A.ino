@@ -36,7 +36,7 @@
 #else
 #define SERIAL_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
 #endif
-#define GSM_BUUFER_LEN 180 // Размер буфера для приема данных от GSM модема
+#define GSM_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
 #define GSM_DELAY 500         // Задержка между командами модема
 
@@ -575,16 +575,16 @@ boolean set_gprs_profile() {
   return ret;    
 }
 
-void set_settings(char *settings_str,byte idx,byte max_len) {
+void set_settings(char *settings_str,char *data, byte idx,byte max_len) {
   byte i1 = idx;  
   byte i2 = 0;
 
-  while (SerialBuffer[i1] == ' ') {
+  while (data[i1] == ' ') {
     i1++;
     if (i1 == SERIAL_BUUFER_LEN) return;
   }
-  while (isPrintable(SerialBuffer[i1]) and SerialBuffer[i1] != ' ') {
-    settings_str[i2] = SerialBuffer[i1];
+  while (isPrintable(data[i1]) and data[i1] != ' ') {
+    settings_str[i2] = data[i1];
     i1++;
     if (i1 == SERIAL_BUUFER_LEN) break;
     i2++;
@@ -593,32 +593,16 @@ void set_settings(char *settings_str,byte idx,byte max_len) {
   settings_str[i2] = '\0';
 }
 
-void send_sms(char *cmd, char *data, byte idx) {
-  char phone_number[15];
-  byte i1 = idx;
-  byte i2 = 0;
-
-  while (i1 > 0) {
-    if (SerialBuffer[i1] == '"' && SerialBuffer[i1+1] == '+') break;
-    i1--;
-  }
-  if (i1 == 0) return;
-  while (SerialBuffer[i1] != ',') {
-    phone_number[i2] = SerialBuffer[i1];
-    i1++;
-    i2++;
-    if (i2 == 14) break;
-  }
-  phone_number[i2] = '\0';
+void send_sms(char *phone, char *cmd, char *data) {
 #ifdef DEBUG
   Serial.print("SMS to number = ");
-  Serial.println(phone_number);
+  Serial.println(phone);
   Serial.print(cmd);
   Serial.println(data);
 #endif
   mySerial.print("AT+CMGS=");
   delay(GSM_DELAY);
-  if (gsm_command(phone_number,">",2)) {
+  if (gsm_command(phone,">",2)) {
     delay(GSM_DELAY);
     mySerial.print(cmd);
     delay(GSM_DELAY);
@@ -628,59 +612,88 @@ void send_sms(char *cmd, char *data, byte idx) {
   }
 }
 
+void extract_phone_number(char *phone, char *data, byte idx) {
+  byte i1 = idx;
+  byte i2 = 0;
+
+  while (i1 > 0) {
+    if (data[i1] == '"' && data[i1+1] == '+') break;
+    i1--;
+  }
+  if (i1 == 0) return;
+  while (data[i1] != ',') {
+    phone[i2] = data[i1];
+    i1++;
+    i2++;
+    if (i2 == 14) break;
+  }
+  phone[i2] = '\0';
+}
+
 void read_sms() {
   boolean ret;
   byte i;
   boolean reboot = false;
+  char phone_number[15];
 
   delay(GSM_DELAY);
   gsm_command("AT+CMGL=\"REC UNREAD\"" ,"OK",5); // Читаем все новые смс-ки в буфер
+  memset(&gsm_cmd,0,sizeof(gsm_cmd));
+  strcpy(gsm_cmd,SerialBuffer);
   for (i = 0; i < SERIAL_BUUFER_LEN - 4; i++) {
-    if (strncmp("APN ",&SerialBuffer[i],4) == 0) {
-      set_settings(settings.gsm_apn,i+4,32);
+    if (strncmp("APN ",&gsm_cmd[i],4) == 0) {
+      set_settings(settings.gsm_apn,gsm_cmd,i+4,32);
       saveSettingsToFlash();
       set_gprs_profile();      
-      send_sms("APN:",settings.gsm_apn,i);
+      extract_phone_number(phone_number,gsm_cmd,i);
+      send_sms(phone_number,"APN:",settings.gsm_apn);
     }
-    if (strncmp("DEFAULTS",&SerialBuffer[i],8) == 0) {
+    if (strncmp("DEFAULTS",&gsm_cmd[i],8) == 0) {
       clearSettings();
       saveSettingsToFlash();
-      send_sms("DEFAULTS:","OK",i);
+      extract_phone_number(phone_number,gsm_cmd,i);
+      send_sms(phone_number,"DEFAULTS:","OK");
     }
     if (strncmp("TRANSMIT ",&SerialBuffer[i],9) == 0) {
-      set_settings(transmitter_id,i+9,5);
+      set_settings(transmitter_id,gsm_cmd,i+9,6);
       settings.dex_tx_id = asciiToDexcomSrc (transmitter_id);
       dex_tx_id = settings.dex_tx_id;
       saveSettingsToFlash();
-      send_sms("TRANSMIT:",transmitter_id,i);
+      extract_phone_number(phone_number,gsm_cmd,i);
+      send_sms(phone_number,"TRANSMIT:",transmitter_id);
     }
-    if (strncmp("HTTP ",&SerialBuffer[i],5) == 0) {
-      set_settings(settings.http_url,i+5,56);
+    if (strncmp("HTTP ",&gsm_cmd[i],5) == 0) {
+      set_settings(settings.http_url,gsm_cmd,i+5,56);
       saveSettingsToFlash();
-      send_sms("HTTP:",settings.http_url,i);
+      extract_phone_number(phone_number,gsm_cmd,i);
+      send_sms(phone_number,"HTTP:",settings.http_url);
     }
-    if (strncmp("PWD ",&SerialBuffer[i],4) == 0) {
-      set_settings(settings.password_code,i+4,6);
+    if (strncmp("PWD ",&gsm_cmd[i],4) == 0) {
+      set_settings(settings.password_code,gsm_cmd,i+4,6);
       saveSettingsToFlash();
-      send_sms("PWD:",settings.password_code,i);
+      extract_phone_number(phone_number,gsm_cmd,i);
+      send_sms(phone_number,"PWD:",settings.password_code);
     }
-    if (strncmp("REBOOT",&SerialBuffer[i],6) == 0) {
+    if (strncmp("REBOOT",&gsm_cmd[i],6) == 0) {
       reboot = true;
-      send_sms("REBOOT:","OK",i);
+      extract_phone_number(phone_number,gsm_cmd,i);
+      send_sms(phone_number,"REBOOT:","OK");
     }
-    if (strncmp("SETTINGS",&SerialBuffer[i],8) == 0) {
-      send_sms("TRANSMIT:",transmitter_id,i);
-      send_sms("APN:",settings.gsm_apn,i);
-      send_sms("HTTP:",settings.http_url,i);
-      send_sms("PWD:",settings.password_code,i);     
+    if (strncmp("SETTINGS",&gsm_cmd[i],8) == 0) {
+      extract_phone_number(phone_number,gsm_cmd,i);
+      send_sms(phone_number,"TRANSMIT:",transmitter_id);
+      send_sms(phone_number,"APN:",settings.gsm_apn);
+      send_sms(phone_number,"HTTP:",settings.http_url);
+      send_sms(phone_number,"PWD:",settings.password_code);     
     }
   }
-  delay(200);
+  delay(GSM_DELAY);
   gsm_command("AT+CMGDA=\"DEL READ\"","OK",5); // Удалить прочитанные смс-ки
-  delay(200);
+  delay(GSM_DELAY);
   gsm_command("AT+CMGDA=\"DEL SENT\"","OK",5); // Удалить отправленные смс-ки
   if (reboot) resetFunc();
 }
+
 
 void gsm_wake_up() {
   digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
