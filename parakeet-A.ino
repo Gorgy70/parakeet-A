@@ -1,8 +1,9 @@
+#define NEW_PCB
 //#define DEBUG
 #define GSM_MODEM
-//#define INT_BLINK_LED
 #define ARDUINO_SLEEP
 //#define ARDUINO_DELAY
+//#define INT_BLINK_LED
 #define EXT_BLINK_LED
 
 #include <SPI.h>
@@ -18,13 +19,23 @@
 #include <avr/interrupt.h> //AVR MCU interrupt flags management.
 #endif
 
-#define GDO0_PIN 3            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
-#define DTR_PIN  2            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
-#define TX_PIN   8            // Tx контакт для последовательного порта
-#define RX_PIN   9            // Rx контакт для последовательного порта
-#ifdef EXT_BLINK_LED
-#define RED_LED_PIN 5
-#define YELLOW_LED_PIN 4
+#ifdef NEW_PCB
+  #define GDO0_PIN 9            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+  #define DTR_PIN  8            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
+  #define TX_PIN   7            // Tx контакт для последовательного порта
+  #define RX_PIN   6            // Rx контакт для последовательного порта
+  #define RED_LED_PIN 4
+  #define YELLOW_LED_PIN 5
+#else
+  #define GDO0_PIN 3            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+  #define DTR_PIN  2            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
+  #define TX_PIN   8            // Tx контакт для последовательного порта
+  #define RX_PIN   9            // Rx контакт для последовательного порта
+
+  #ifdef EXT_BLINK_LED
+    #define RED_LED_PIN 5
+    #define YELLOW_LED_PIN 4
+  #endif
 #endif
 
 
@@ -45,6 +56,7 @@
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
 #define my_password_code  "12354"
+#define WDTO_2S_MS 2371 // Время ожидания строжевого пса "примерно 2 секунды"
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
@@ -1166,12 +1178,11 @@ void print_packet() {
 void setup_watchdog(byte sleep_time)
 {
   wdt_enable(sleep_time);
+  WDTCSR|= _BV(WDIE);     // enable interrupts instead of MCU reset when watchdog is timed out
 }
 
 /************************************************************************************************************/
 /*
-    ATtiny85_sleep()
-
     Puts MCU into the sleep state
 
     NOTE: There are 6 different sleeps modes:
@@ -1189,13 +1200,8 @@ void setup_watchdog(byte sleep_time)
                                      can wake up the MCU.      
 */
 /************************************************************************************************************/
-void arduino_sleep(byte sleep_time)
+void arduino_sleep()
 {
-  setup_watchdog(sleep_time); // Максимальное время сна контроллера
-  WDTCSR|= _BV(WDIE);     /* enable interrupts instead of MCU reset when watchdog is timed out
-                             used for wake-up MCU from power-down */
-  power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
-  
   set_sleep_mode(SLEEP_MODE_PWR_DOWN); //set the sleep type
 //  set_sleep_mode(SLEEP_MODE_PWR_SAVE); //set the sleep type
 //  set_sleep_mode(SLEEP_MODE_STANDBY); //set the sleep type
@@ -1208,7 +1214,6 @@ void arduino_sleep(byte sleep_time)
 }
 
 void arduino_wake_up() {
-  wdt_disable(); // Выключим строжевого пса
   power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
   delay(5);                 //to settle down the ADC and peripheries
 }
@@ -1234,24 +1239,19 @@ void loop() {
       Serial.println("Sleep");
       Serial.print(" c_tm-");
       Serial.println(millis());
-#endif
-      watchdog_counter = 0;     //reset watchdog_counter
-//      watchdog_counter_max = (next_time - current_time - 15000) / 8000;
-      watchdog_counter_max = ((next_time - current_time) / 10000);
-      watchdog_counter_max -= 1;
-//      next_time =- 8000*watchdog_counter_max;
-      next_time = 0;
-#ifdef DEBUG
-      Serial.print("cnt-");
-      Serial.println(watchdog_counter_max);
       delay(200);
 #endif
+      watchdog_counter = 0;     //reset watchdog_counter
+      watchdog_counter_max = ((next_time - current_time - 2000) / WDTO_2S_MS); // Будем включаться за 2 секунды + остаток таймера до пакета
+      next_time -= WDTO_2S_MS*watchdog_counter_max;
+      power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
+      setup_watchdog(WDTO_2S); // Включаем строжевого пса
       while (watchdog_counter < watchdog_counter_max) 
       {
-        arduino_sleep(WDTO_8S);
-//        current_time = millis();
+        arduino_sleep();
       }
-      arduino_sleep(WDTO_4S);
+//      arduino_sleep(WDTO_4S);
+      wdt_disable(); // Выключим строжевого пса
       arduino_wake_up();
 #endif
 
@@ -1297,6 +1297,6 @@ void loop() {
 ISR(WDT_vect)
 {
   watchdog_counter++;
+  WDTCSR|= _BV(WDIE);     // enable interrupts instead of MCU reset when watchdog is timed out
 }
-
 
