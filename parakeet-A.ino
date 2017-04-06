@@ -1,4 +1,4 @@
-#define NEW_PCB
+//#define NEW_PCB
 //#define DEBUG
 #define GSM_MODEM
 #define ARDUINO_SLEEP
@@ -95,7 +95,10 @@ char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения да�
 char gsm_cmd[GSM_BUUFER_LEN]; // Буффер для формирования GSM команд
 boolean low_battery = false;
 
+#ifdef ARDUINO_SLEEP
 volatile long watchdog_counter;
+int wdto_2s_ms = WDTO_2S_MS;
+#endif
 
 // Коды ошибок мигают лампочкой в двоичной системе
 // 1 (0001) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
@@ -871,8 +874,30 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 #endif
   }  
 }
-
 #endif
+
+#ifdef ARDUINO_SLEEP
+void calibrate_watchdog() {
+  unsigned long start_time;
+  unsigned long end_time;
+
+  watchdog_counter = 0;     //reset watchdog_counter
+  start_time = millis();
+  setup_watchdog(WDTO_2S); // Включаем строжевого пса
+  while (watchdog_counter < 4) 
+  {
+//    arduino_sleep();
+  }
+  wdt_disable(); // Выключим строжевого пса
+  end_time = millis();
+  wdto_2s_ms = (end_time - start_time) / 4;
+#ifdef DEBUG
+  Serial.println("WDT_2S=");
+  Serial.println(wdto_2s_ms);
+#endif
+}
+#endif
+
 
 void setup() {
 #ifdef DEBUG
@@ -916,6 +941,7 @@ void setup() {
   digitalWrite(DTR_PIN, LOW);
   init_GSM();
 #endif
+  calibrate_watchdog();
 }
 
 /*
@@ -1077,6 +1103,7 @@ boolean get_packet (void) {
     Serial.println(sequential_missed_packets);
 #endif
     if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
+      calibrate_watchdog();
       next_time = 0;
       sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
     }  
@@ -1242,8 +1269,8 @@ void loop() {
       delay(200);
 #endif
       watchdog_counter = 0;     //reset watchdog_counter
-      watchdog_counter_max = ((next_time - current_time - 2000) / WDTO_2S_MS); // Будем включаться за 2 секунды + остаток таймера до пакета
-      next_time -= WDTO_2S_MS*watchdog_counter_max;
+      watchdog_counter_max = ((next_time - current_time - 2000) / wdto_2s_ms); // Будем включаться за 2 секунды + остаток таймера до пакета
+      next_time -= wdto_2s_ms*watchdog_counter_max;
       power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
       setup_watchdog(WDTO_2S); // Включаем строжевого пса
       while (watchdog_counter < watchdog_counter_max) 
@@ -1287,6 +1314,7 @@ void loop() {
 
 }
 
+#ifdef ARDUINO_SLEEP
 /************************************************************************************************************/
 /*
     ISR(WDT_vect)
@@ -1299,4 +1327,5 @@ ISR(WDT_vect)
   watchdog_counter++;
   WDTCSR|= _BV(WDIE);     // enable interrupts instead of MCU reset when watchdog is timed out
 }
+#endif
 
