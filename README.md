@@ -2,8 +2,8 @@
 
 Перевод проекта Parakeet с платформы Wixel на платофрму Arduino.<br>
 Данный проект основан на следующих проектах:<br>
-1. Parakeet от Jamorham (https://jamorham.github.io/,https://github.com/jamorham/wixel-xDrip)<br>
-2. XDrip от Emma Black (http://stephenblackwasalreadytaken.github.io/xDrip/,https://github.com/StephenBlackWasAlreadyTaken/xDrip)<br>
+1. Parakeet от Jamorham (https://jamorham.github.io, https://github.com/jamorham/wixel-xDrip)<br>
+2. XDrip от Emma Black (http://stephenblackwasalreadytaken.github.io/xDrip, https://github.com/StephenBlackWasAlreadyTaken/xDrip)<br>
 3. CC2500-Project от Don Browne (https://github.com/brownedon/CC2500-Project)<br>
 <br>
 <br>
@@ -20,7 +20,11 @@ https://www.aliexpress.com/item/CC2500-PA-LNA-2-4G-SPI-22dBm-Wireless-Data-Trans
 Это модуль имеет усилитель слабого сигнала и очень неплохую чувствительность и рекомендуется к покупке.<br>
 3. Модуль контроля заряда батареи.<br>
 4. Аккумулятор 3.7 В.<br>
-5. Адаптер USB-Serial для заливки прошивки. Я покупал вот этот: http://robotdyn.ru/catalog/boards/usb_serial_adapter_ch340g_5v_3_3v<br>
+Я нашел аккумулятор под размер печатной платы:<br>
+https://www.aliexpress.com/item/754060-MP3-MP4-2500MAH-3-7V-Bluetooth-stereo-mobile-power-polymer-lithium-battery/32790808657.html?spm=2114.13010608.0.0.TSSHRb
+<br>
+но можно использовать любой подходящий.<br>
+5. Адаптер USB-Serial для заливки прошивки. Я покупал вот этот: http://robotdyn.ru/catalog/boards/usb_serial_adapter_ch340g_5v_3_3v/<br>
 <br>
 <br>
 Соединяем между собой модули:<br>
@@ -51,6 +55,7 @@ TX адаптера USB-Serial - RX Ардуино<br>
 RX адаптера USB-Serial - TX Ардуино<br>
 Правильная схема подключения адаптера выбирается экспериментально.<br>
 <br>
+В файле parakeet-A.lay6 находится печатная плата прибора в формате Sprint-Layout 6 (выражаю огромную благодарность Олегу Романовскому за помощь в разработке) <br>
 <br>
 <b>Заливка прошивки в прибор:</b><br>
 <br>
