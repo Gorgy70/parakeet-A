@@ -49,12 +49,13 @@
 #endif
 #define GSM_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
-#define GSM_DELAY 500         // Задержка между командами модема
+#define GSM_DELAY 200         // Задержка между командами модема
 
 #define my_webservice_url  "http://parakeet.esen.ru/receiver.cgi"
 #define my_webservice_reply     "!ACK"
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
+//#define my_gprs_apn   "internet.beeline.ru"
 #define my_password_code  "12354"
 #define WDTO_2S_MS 2371 // Время ожидания строжевого пса "примерно 2 секунды"
 
@@ -63,7 +64,8 @@ SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 unsigned long dex_tx_id;
 //char transmitter_id[] = "ABCDE";
 //char transmitter_id[] = "6518Y";
-  char transmitter_id[] = "69NL1";
+char transmitter_id[] = "69NL1";
+//char transmitter_id[] = "619MY";
 
 unsigned long packet_received = 0;
 
@@ -523,7 +525,8 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   else {
     ret = false;
   }  
-  memset (&SerialBuffer,0,sizeof(SerialBuffer));
+//  memset (&SerialBuffer,0,sizeof(SerialBuffer));
+  memset (&SerialBuffer[0],0,sizeof(SerialBuffer));
 //  memset (&settings, 0, sizeof (settings));
 //  mySerial.write(command);
 //  mySerial.write("\r\n"); // enter key
@@ -876,29 +879,6 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 }
 #endif
 
-#ifdef ARDUINO_SLEEP
-void calibrate_watchdog() {
-  unsigned long start_time;
-  unsigned long end_time;
-
-  watchdog_counter = 0;     //reset watchdog_counter
-  start_time = millis();
-  setup_watchdog(WDTO_2S); // Включаем строжевого пса
-  while (watchdog_counter < 4) 
-  {
-//    arduino_sleep();
-  }
-  wdt_disable(); // Выключим строжевого пса
-  end_time = millis();
-  wdto_2s_ms = (end_time - start_time) / 4;
-#ifdef DEBUG
-  Serial.println("WDT_2S=");
-  Serial.println(wdto_2s_ms);
-#endif
-}
-#endif
-
-
 void setup() {
 #ifdef DEBUG
   byte b1;
@@ -941,7 +921,9 @@ void setup() {
   digitalWrite(DTR_PIN, LOW);
   init_GSM();
 #endif
+#ifdef ARDUINO_SLEEP
   calibrate_watchdog();
+#endif
 }
 
 /*
@@ -1103,7 +1085,9 @@ boolean get_packet (void) {
     Serial.println(sequential_missed_packets);
 #endif
     if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
+#ifdef ARDUINO_SLEEP
       calibrate_watchdog();
+#endif
       next_time = 0;
       sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
     }  
@@ -1164,7 +1148,9 @@ void print_packet() {
   if (gsm_availible) {
     if (!send_gprs_data()) {
       set_gprs_profile();
-      send_gprs_data();
+      if (!send_gprs_data()) {
+        gsm_availible = false;
+      }
     }
     
   }  
@@ -1243,6 +1229,26 @@ void arduino_sleep()
 void arduino_wake_up() {
   power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
   delay(5);                 //to settle down the ADC and peripheries
+}
+
+void calibrate_watchdog() {
+  unsigned long start_time;
+  unsigned long end_time;
+
+  watchdog_counter = 0;     //reset watchdog_counter
+  start_time = millis();
+  setup_watchdog(WDTO_2S); // Включаем строжевого пса
+  while (watchdog_counter < 4) 
+  {
+//    arduino_sleep();
+  }
+  wdt_disable(); // Выключим строжевого пса
+  end_time = millis();
+  wdto_2s_ms = (end_time - start_time) / 4;
+#ifdef DEBUG
+  Serial.println("WDT_2S=");
+  Serial.println(wdto_2s_ms);
+#endif
 }
 #endif
 
