@@ -43,7 +43,7 @@
 #define FIVE_MINUTE 300000    // 5 минут
 
 #ifdef DEBUG
-#define SERIAL_BUUFER_LEN 90 // Размер буфера для приема данных от GSM модема
+#define SERIAL_BUUFER_LEN 110 // Размер буфера для приема данных от GSM модема
 #else
 #define SERIAL_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
 #endif
@@ -96,6 +96,7 @@ boolean modem_availible = false; // Доступность модема на п�
 char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения данных их последовательного порта
 char gsm_cmd[GSM_BUUFER_LEN]; // Буффер для формирования GSM команд
 boolean low_battery = false;
+byte gsm_error_count = 0;
 
 #ifdef ARDUINO_SLEEP
 volatile long watchdog_counter;
@@ -719,6 +720,7 @@ void gsm_wake_up() {
    // Включаем мигание модема
   if (!gsm_command("AT+CNETLIGHT=1", "OK", 2))
   {
+    modem_availible = false;
     init_gsm_modem();
     if (modem_availible) {
       gsm_command("AT+CNETLIGHT=1", "OK", 2);
@@ -1084,7 +1086,7 @@ boolean get_packet (void) {
     Serial.print("Missed-");
     Serial.println(sequential_missed_packets);
 #endif
-    if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
+    if (sequential_missed_packets > misses_until_failure && next_time > 0) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
 #ifdef ARDUINO_SLEEP
       calibrate_watchdog();
 #endif
@@ -1129,11 +1131,14 @@ boolean send_gprs_data() {
   sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s\" ",settings.http_url,millis(),dex_tx_id,settings.password_code,
                                                                                                                          dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
                                                                                                                          Pkt.battery,millis()-catch_time,batteryPercent, batteryMillivolts, 
-                                                                                                                         analogRead(8)-290, lastLocation);         
+                                                                                                                         37, lastLocation);         
   gsm_command(gsm_cmd,"OK",2) ;
   res1 = gsm_command("AT+HTTPACTION=0", "+HTTPACTION: 0,200,", 60); // Отправляем запрос на сервер
   gsm_command("AT+HTTPREAD", my_webservice_reply , 20) ;    // Читаем ответ вэб-сервиса
   gsm_command("AT+HTTPTERM", "OK", 2); // Завершаем http сессию
+  if (res1) {
+    gsm_error_count = 0;
+  }
   return res1;
 }
 #endif
@@ -1148,8 +1153,9 @@ void print_packet() {
   if (gsm_availible) {
     if (!send_gprs_data()) {
       set_gprs_profile();
-      if (!send_gprs_data()) {
+      if (!send_gprs_data()) {      
         gsm_availible = false;
+        gsm_error_count++;
       }
     }
     
@@ -1309,6 +1315,11 @@ void loop() {
   if (get_packet ())
   {
     print_packet ();
+/*    
+    if (gsm_error_count > 3) {
+      resetFunc();
+    }
+*/    
   }
 #ifdef GSM_MODEM
   if (gsm_availible) {
