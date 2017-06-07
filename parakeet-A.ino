@@ -26,6 +26,7 @@
   #define RX_PIN   6            // Rx контакт для последовательного порта
   #define RED_LED_PIN 4
   #define YELLOW_LED_PIN 5
+  #define MODEM_RST_PIN 3
 #else
   #define GDO0_PIN 3            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
   #define DTR_PIN  2            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
@@ -36,6 +37,7 @@
     #define RED_LED_PIN 5
     #define YELLOW_LED_PIN 4
   #endif
+  #define MODEM_RST_PIN 7
 #endif
 
 
@@ -93,6 +95,7 @@ byte misses_until_failure = 2;                                                  
 
 boolean gsm_availible = false; // Доступность связи GSM
 boolean modem_availible = false; // Доступность модема на порту
+boolean internet_availible = false; // Флаг подключения мобильного интернета
 char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения данных их последовательного порта
 char gsm_cmd[GSM_BUUFER_LEN]; // Буффер для формирования GSM команд
 boolean low_battery = false;
@@ -107,6 +110,7 @@ int wdto_2s_ms = WDTO_2S_MS;
 // 1 (0001) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
 // 2 (0010) - Не подключен модем.
 // 3 (0011) - Нет мобильной связи
+// 4 (0100) - Нет мобильного интернета
 // 
 
 typedef struct _Dexcom_packet
@@ -773,7 +777,7 @@ boolean init_gsm_modem()
   return true;
 }
 
-void init_GSM() {
+void init_GSM(boolean sleep_after_init) {
   if (!init_gsm_modem()) return;
   init_base_gsm();
   delay(200);
@@ -791,8 +795,19 @@ void init_GSM() {
     else {
       gsm_command("AT+CMGL=0","OK",10);
     }
-    set_gprs_profile();
-    gsm_goto_sleep();
+    internet_availible = set_gprs_profile();
+    if (!internet_availible) {
+#ifdef INT_BLINK_LED
+      blink_sequence("0100");
+#endif
+#ifdef EXT_BLINK_LED
+      blink_sequence_red("0100");
+#endif
+      
+    }
+    if (sleep_after_init) {
+      gsm_goto_sleep();
+    }  
   }  
   else {
 #ifdef INT_BLINK_LED
@@ -888,6 +903,7 @@ void setup() {
  
   pinMode(GDO0_PIN, INPUT);
   pinMode(DTR_PIN, OUTPUT);
+  pinMode(MODEM_RST_PIN, OUTPUT);
 //  analogReference(INTERNAL);
 #ifdef DEBUG
   Serial.begin(9600);
@@ -920,8 +936,9 @@ void setup() {
   mySerial.begin(9600);
   loadSettingsFromFlash(); 
 #ifdef GSM_MODEM
+  digitalWrite(MODEM_RST_PIN, HIGH);
   digitalWrite(DTR_PIN, LOW);
-  init_GSM();
+  init_GSM(true);
 #endif
 #ifdef ARDUINO_SLEEP
   calibrate_watchdog();
@@ -1081,7 +1098,9 @@ boolean get_packet (void) {
     }
   }
   if (!nRet) {
-    sequential_missed_packets++;
+    if (next_time > 0) {
+      sequential_missed_packets++;
+    }
 #ifdef DEBUG
     Serial.print("Missed-");
     Serial.println(sequential_missed_packets);
@@ -1147,16 +1166,27 @@ void print_packet() {
   
 #ifdef GSM_MODEM
   gsm_wake_up(); // Будим GSM-модем
-  if (!gsm_availible) {
-    init_GSM();
+  if (!modem_availible) {
+    init_GSM(false);
   }
-  if (gsm_availible) {
+  if (internet_availible) {
     if (!send_gprs_data()) {
-      set_gprs_profile();
-      if (!send_gprs_data()) {      
-        gsm_availible = false;
-        gsm_error_count++;
+      internet_availible = set_gprs_profile();
+      if (internet_availible) {
+        if (!send_gprs_data()) {      
+          gsm_availible = false;
+          gsm_error_count++;
+        }
       }
+      else {
+#ifdef INT_BLINK_LED
+        blink_sequence("0100");
+#endif
+#ifdef EXT_BLINK_LED
+        blink_sequence_red("0100");
+#endif      
+      }
+        
     }
     
   }  
