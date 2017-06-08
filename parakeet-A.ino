@@ -1190,6 +1190,15 @@ void print_packet() {
     }
     
   }  
+  else {
+    modem_availible = false;
+#ifdef INT_BLINK_LED
+    blink_sequence("0100");
+#endif
+#ifdef EXT_BLINK_LED
+    blink_sequence_red("0100");
+#endif      
+  }
 #endif
 /*
 #ifdef DEBUG
