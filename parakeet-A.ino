@@ -1,4 +1,4 @@
-//#define NEW_PCB
+#define NEW_PCB
 //#define DEBUG
 #define GSM_MODEM
 #define ARDUINO_SLEEP
@@ -26,7 +26,6 @@
   #define RX_PIN   6            // Rx контакт для последовательного порта
   #define RED_LED_PIN 4
   #define YELLOW_LED_PIN 5
-  #define MODEM_RST_PIN 3
 #else
   #define GDO0_PIN 3            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
   #define DTR_PIN  2            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
@@ -37,7 +36,6 @@
     #define RED_LED_PIN 5
     #define YELLOW_LED_PIN 4
   #endif
-  #define MODEM_RST_PIN 7
 #endif
 
 
@@ -903,7 +901,6 @@ void setup() {
  
   pinMode(GDO0_PIN, INPUT);
   pinMode(DTR_PIN, OUTPUT);
-  pinMode(MODEM_RST_PIN, OUTPUT);
 //  analogReference(INTERNAL);
 #ifdef DEBUG
   Serial.begin(9600);
@@ -936,7 +933,6 @@ void setup() {
   mySerial.begin(9600);
   loadSettingsFromFlash(); 
 #ifdef GSM_MODEM
-  digitalWrite(MODEM_RST_PIN, HIGH);
   digitalWrite(DTR_PIN, LOW);
   init_GSM(true);
 #endif
