@@ -5,6 +5,7 @@
 //#define ARDUINO_DELAY
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
+#define MODEM_SLEEP_DTR
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
@@ -56,16 +57,19 @@
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
 //#define my_gprs_apn   "internet.beeline.ru"
+//#define my_gprs_apn   "vmi.velcom.by"
 #define my_password_code  "12354"
 #define WDTO_2S_MS 2371 // Время ожидания строжевого пса "примерно 2 секунды"
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
 unsigned long dex_tx_id;
-//char transmitter_id[] = "ABCDE";
+char transmitter_id[] = "ABCDE";
 //char transmitter_id[] = "6518Y";
-char transmitter_id[] = "69NL1";
+//char transmitter_id[] = "69NL1";
 //char transmitter_id[] = "619MY";
+//char transmitter_id[] = "62SAL";
+//char transmitter_id[] = "607K5";
 
 unsigned long packet_received = 0;
 
@@ -656,6 +660,7 @@ void read_sms() {
   byte i;
   boolean reboot = false;
   char phone_number[15];
+  char ascii_trans_id[6];
 
   delay(GSM_DELAY);
   gsm_command("AT+CMGL=\"REC UNREAD\"" ,"OK",5); // Читаем все новые смс-ки в буфер
@@ -702,7 +707,8 @@ void read_sms() {
     }
     if (strncmp("SETTINGS",&gsm_cmd[i],8) == 0) {
       extract_phone_number(phone_number,gsm_cmd,i);
-      send_sms(phone_number,"TRANSMIT:",transmitter_id);
+      dexcom_src_to_ascii(dex_tx_id,ascii_trans_id);
+      send_sms(phone_number,"TRANSMIT:",ascii_trans_id);
       send_sms(phone_number,"APN:",settings.gsm_apn);
       send_sms(phone_number,"HTTP:",settings.http_url);
       send_sms(phone_number,"PWD:",settings.password_code);     
@@ -717,7 +723,13 @@ void read_sms() {
 
 
 void gsm_wake_up() {
+#ifdef MODEM_SLEEP_DTR  
   digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
+#else  
+  mySerial.write(27);
+  delay(GSM_DELAY); 
+  gsm_command("AT+CSCLK=0", "OK", 2); // Отключаем на модеме режим сна
+#endif  
   delay(GSM_DELAY); 
    // Включаем мигание модема
   if (!gsm_command("AT+CNETLIGHT=1", "OK", 2))
@@ -731,11 +743,15 @@ void gsm_wake_up() {
 }
 
 void gsm_goto_sleep() {
-//  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
 //  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   gsm_command("AT+CNETLIGHT=0", "OK", 2); // Отключаем мигание модема
   delay(GSM_DELAY);
+#ifdef MODEM_SLEEP_DTR  
   digitalWrite(DTR_PIN, HIGH);
+#else  
+  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна 2
+  delay(GSM_DELAY);
+#endif  
 }
 
 void init_base_gsm()
@@ -779,8 +795,10 @@ void init_GSM(boolean sleep_after_init) {
   if (!init_gsm_modem()) return;
   init_base_gsm();
   delay(200);
+#ifdef MODEM_SLEEP_DTR  
   gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   delay(200);
+#endif  
   gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
   if (gsm_availible) {
     delay(GSM_DELAY);
@@ -901,6 +919,7 @@ void setup() {
  
   pinMode(GDO0_PIN, INPUT);
   pinMode(DTR_PIN, OUTPUT);
+  digitalWrite(DTR_PIN, LOW);
 //  analogReference(INTERNAL);
 #ifdef DEBUG
   Serial.begin(9600);
