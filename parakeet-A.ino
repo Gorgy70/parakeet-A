@@ -6,6 +6,7 @@
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
 #define MODEM_SLEEP_DTR
+//#define CC2500_LEN_CONTROL
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
@@ -27,6 +28,7 @@
   #define RX_PIN   6            // Rx контакт для последовательного порта
   #define RED_LED_PIN 4
   #define YELLOW_LED_PIN 5
+  #define LEN_PIN    A1            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
 #else
   #define GDO0_PIN 3            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
   #define DTR_PIN  2            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
@@ -37,6 +39,7 @@
     #define RED_LED_PIN 5
     #define YELLOW_LED_PIN 4
   #endif
+  #define LEN_PIN    A1            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
 #endif
 
 
@@ -935,6 +938,9 @@ void setup() {
   pinMode(RED_LED_PIN, OUTPUT);
   pinMode(YELLOW_LED_PIN, OUTPUT);
 #endif
+#ifdef CC2500_LEN_CONTROL
+  pinMode(LEN_PIN, OUTPUT);
+#endif
 
   SPI.begin();
   //  SPI.setClockDivider(SPI_CLOCK_DIV2);  // max SPI speed, 1/2 F_CLOCK
@@ -1017,6 +1023,9 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
   start_time = millis();
   swap_channel(nChannels[channel_index], fOffset[channel_index]);
 
+#ifdef CC2500_LEN_CONTROL
+  digitalWrite(LEN_PIN, HIGH);
+#endif
 #ifdef DEBUG
   Serial.print("Ch=");
   Serial.print(nChannels[channel_index]);
@@ -1090,6 +1099,9 @@ boolean WaitForPacket(unsigned int milliseconds_wait, byte channel_index)
     }
   }
 
+#ifdef CC2500_LEN_CONTROL
+  digitalWrite(LEN_PIN, LOW);
+#endif
 #ifdef INT_BLINK_LED
   digitalWrite(LED_BUILTIN, LOW);
 #endif
