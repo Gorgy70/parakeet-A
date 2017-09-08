@@ -1,10 +1,11 @@
-//#define NEW_PCB
+#define NEW_PCB
 //#define DEBUG
 #define GSM_MODEM
 #define ARDUINO_SLEEP
 //#define ARDUINO_DELAY
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
+#define MODEM_SLEEP_DTR
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
@@ -43,27 +44,32 @@
 #define FIVE_MINUTE 300000    // 5 минут
 
 #ifdef DEBUG
-#define SERIAL_BUUFER_LEN 90 // Размер буфера для приема данных от GSM модема
+#define SERIAL_BUUFER_LEN 110 // Размер буфера для приема данных от GSM модема
 #else
 #define SERIAL_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
 #endif
 #define GSM_BUUFER_LEN 200 // Размер буфера для приема данных от GSM модема
 
-#define GSM_DELAY 500         // Задержка между командами модема
+#define GSM_DELAY 200         // Задержка между командами модема
 
 #define my_webservice_url  "http://parakeet.esen.ru/receiver.cgi"
 #define my_webservice_reply     "!ACK"
 #define my_user_agent     "parakeet_A"
 #define my_gprs_apn   "internet.mts.ru"
+//#define my_gprs_apn   "internet.beeline.ru"
+//#define my_gprs_apn   "vmi.velcom.by"
 #define my_password_code  "12354"
 #define WDTO_2S_MS 2371 // Время ожидания строжевого пса "примерно 2 секунды"
 
 SoftwareSerial mySerial(RX_PIN, TX_PIN); // RX, TX
 
 unsigned long dex_tx_id;
-//char transmitter_id[] = "ABCDE";
+char transmitter_id[] = "ABCDE";
 //char transmitter_id[] = "6518Y";
-  char transmitter_id[] = "69NL1";
+//char transmitter_id[] = "69NL1";
+//char transmitter_id[] = "619MY";
+//char transmitter_id[] = "62SAL";
+//char transmitter_id[] = "607K5";
 
 unsigned long packet_received = 0;
 
@@ -91,9 +97,11 @@ byte misses_until_failure = 2;                                                  
 
 boolean gsm_availible = false; // Доступность связи GSM
 boolean modem_availible = false; // Доступность модема на порту
+boolean internet_availible = false; // Флаг подключения мобильного интернета
 char SerialBuffer[SERIAL_BUUFER_LEN] ; // Буффер для чтения данных их последовательного порта
 char gsm_cmd[GSM_BUUFER_LEN]; // Буффер для формирования GSM команд
 boolean low_battery = false;
+byte gsm_error_count = 0;
 
 #ifdef ARDUINO_SLEEP
 volatile long watchdog_counter;
@@ -104,6 +112,7 @@ int wdto_2s_ms = WDTO_2S_MS;
 // 1 (0001) - Неверный CRC в сохраненных настройках. Берем настройки по умолчанию
 // 2 (0010) - Не подключен модем.
 // 3 (0011) - Нет мобильной связи
+// 4 (0100) - Нет мобильного интернета
 // 
 
 typedef struct _Dexcom_packet
@@ -523,7 +532,8 @@ boolean gsm_command(const char *command, const char *response, int timeout) {
   else {
     ret = false;
   }  
-  memset (&SerialBuffer,0,sizeof(SerialBuffer));
+//  memset (&SerialBuffer,0,sizeof(SerialBuffer));
+  memset (&SerialBuffer[0],0,sizeof(SerialBuffer));
 //  memset (&settings, 0, sizeof (settings));
 //  mySerial.write(command);
 //  mySerial.write("\r\n"); // enter key
@@ -650,6 +660,7 @@ void read_sms() {
   byte i;
   boolean reboot = false;
   char phone_number[15];
+  char ascii_trans_id[6];
 
   delay(GSM_DELAY);
   gsm_command("AT+CMGL=\"REC UNREAD\"" ,"OK",5); // Читаем все новые смс-ки в буфер
@@ -696,7 +707,8 @@ void read_sms() {
     }
     if (strncmp("SETTINGS",&gsm_cmd[i],8) == 0) {
       extract_phone_number(phone_number,gsm_cmd,i);
-      send_sms(phone_number,"TRANSMIT:",transmitter_id);
+      dexcom_src_to_ascii(dex_tx_id,ascii_trans_id);
+      send_sms(phone_number,"TRANSMIT:",ascii_trans_id);
       send_sms(phone_number,"APN:",settings.gsm_apn);
       send_sms(phone_number,"HTTP:",settings.http_url);
       send_sms(phone_number,"PWD:",settings.password_code);     
@@ -711,11 +723,18 @@ void read_sms() {
 
 
 void gsm_wake_up() {
+#ifdef MODEM_SLEEP_DTR  
   digitalWrite(DTR_PIN, LOW); // Будим GSM-модем
+#else  
+  mySerial.write(27);
+  delay(GSM_DELAY); 
+  gsm_command("AT+CSCLK=0", "OK", 2); // Отключаем на модеме режим сна
+#endif  
   delay(GSM_DELAY); 
    // Включаем мигание модема
   if (!gsm_command("AT+CNETLIGHT=1", "OK", 2))
   {
+    modem_availible = false;
     init_gsm_modem();
     if (modem_availible) {
       gsm_command("AT+CNETLIGHT=1", "OK", 2);
@@ -724,11 +743,15 @@ void gsm_wake_up() {
 }
 
 void gsm_goto_sleep() {
-//  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
 //  gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   gsm_command("AT+CNETLIGHT=0", "OK", 2); // Отключаем мигание модема
   delay(GSM_DELAY);
+#ifdef MODEM_SLEEP_DTR  
   digitalWrite(DTR_PIN, HIGH);
+#else  
+  gsm_command("AT+CSCLK=2", "OK", 2); // Переводим модем в режим сна 2
+  delay(GSM_DELAY);
+#endif  
 }
 
 void init_base_gsm()
@@ -768,12 +791,14 @@ boolean init_gsm_modem()
   return true;
 }
 
-void init_GSM() {
+void init_GSM(boolean sleep_after_init) {
   if (!init_gsm_modem()) return;
   init_base_gsm();
   delay(200);
+#ifdef MODEM_SLEEP_DTR  
   gsm_command("AT+CSCLK=1", "OK", 2); // Переводим модем в режим сна в режиме управления сигналом DTR
   delay(200);
+#endif  
   gsm_availible = gsm_command("AT+CFUN=1", "Call Ready", 30); // Подключаемся к сети  
   if (gsm_availible) {
     delay(GSM_DELAY);
@@ -786,8 +811,19 @@ void init_GSM() {
     else {
       gsm_command("AT+CMGL=0","OK",10);
     }
-    set_gprs_profile();
-    gsm_goto_sleep();
+    internet_availible = set_gprs_profile();
+    if (!internet_availible) {
+#ifdef INT_BLINK_LED
+      blink_sequence("0100");
+#endif
+#ifdef EXT_BLINK_LED
+      blink_sequence_red("0100");
+#endif
+      
+    }
+    if (sleep_after_init) {
+      gsm_goto_sleep();
+    }  
   }  
   else {
 #ifdef INT_BLINK_LED
@@ -876,29 +912,6 @@ void gsm_get_battery(byte *percent,int *millivolts) {
 }
 #endif
 
-#ifdef ARDUINO_SLEEP
-void calibrate_watchdog() {
-  unsigned long start_time;
-  unsigned long end_time;
-
-  watchdog_counter = 0;     //reset watchdog_counter
-  start_time = millis();
-  setup_watchdog(WDTO_2S); // Включаем строжевого пса
-  while (watchdog_counter < 4) 
-  {
-//    arduino_sleep();
-  }
-  wdt_disable(); // Выключим строжевого пса
-  end_time = millis();
-  wdto_2s_ms = (end_time - start_time) / 4;
-#ifdef DEBUG
-  Serial.println("WDT_2S=");
-  Serial.println(wdto_2s_ms);
-#endif
-}
-#endif
-
-
 void setup() {
 #ifdef DEBUG
   byte b1;
@@ -906,6 +919,7 @@ void setup() {
  
   pinMode(GDO0_PIN, INPUT);
   pinMode(DTR_PIN, OUTPUT);
+  digitalWrite(DTR_PIN, LOW);
 //  analogReference(INTERNAL);
 #ifdef DEBUG
   Serial.begin(9600);
@@ -939,9 +953,11 @@ void setup() {
   loadSettingsFromFlash(); 
 #ifdef GSM_MODEM
   digitalWrite(DTR_PIN, LOW);
-  init_GSM();
+  init_GSM(true);
 #endif
+#ifdef ARDUINO_SLEEP
   calibrate_watchdog();
+#endif
 }
 
 /*
@@ -1097,13 +1113,17 @@ boolean get_packet (void) {
     }
   }
   if (!nRet) {
-    sequential_missed_packets++;
+    if (next_time > 0) {
+      sequential_missed_packets++;
+    }
 #ifdef DEBUG
     Serial.print("Missed-");
     Serial.println(sequential_missed_packets);
 #endif
-    if (sequential_missed_packets > misses_until_failure) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
+    if (sequential_missed_packets > misses_until_failure && next_time > 0) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
+#ifdef ARDUINO_SLEEP
       calibrate_watchdog();
+#endif
       next_time = 0;
       sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
     }  
@@ -1145,11 +1165,14 @@ boolean send_gprs_data() {
   sprintf(gsm_cmd,"AT+HTTPPARA=\"URL\",\"%s?rr=%lu&zi=%lu&pc=%s&lv=%lu&lf=%lu&db=%hhu&ts=%lu&bp=%d&bm=%d&ct=%d&gl=%s\" ",settings.http_url,millis(),dex_tx_id,settings.password_code,
                                                                                                                          dex_num_decoder(Pkt.raw),dex_num_decoder(Pkt.filtered)*2,
                                                                                                                          Pkt.battery,millis()-catch_time,batteryPercent, batteryMillivolts, 
-                                                                                                                         analogRead(8)-290, lastLocation);         
+                                                                                                                         37, lastLocation);         
   gsm_command(gsm_cmd,"OK",2) ;
   res1 = gsm_command("AT+HTTPACTION=0", "+HTTPACTION: 0,200,", 60); // Отправляем запрос на сервер
   gsm_command("AT+HTTPREAD", my_webservice_reply , 20) ;    // Читаем ответ вэб-сервиса
   gsm_command("AT+HTTPTERM", "OK", 2); // Завершаем http сессию
+  if (res1) {
+    gsm_error_count = 0;
+  }
   return res1;
 }
 #endif
@@ -1158,16 +1181,39 @@ void print_packet() {
   
 #ifdef GSM_MODEM
   gsm_wake_up(); // Будим GSM-модем
-  if (!gsm_availible) {
-    init_GSM();
+  if (!modem_availible) {
+    init_GSM(false);
   }
-  if (gsm_availible) {
+  if (internet_availible) {
     if (!send_gprs_data()) {
-      set_gprs_profile();
-      send_gprs_data();
+      internet_availible = set_gprs_profile();
+      if (internet_availible) {
+        if (!send_gprs_data()) {      
+          gsm_availible = false;
+          gsm_error_count++;
+        }
+      }
+      else {
+#ifdef INT_BLINK_LED
+        blink_sequence("0100");
+#endif
+#ifdef EXT_BLINK_LED
+        blink_sequence_red("0100");
+#endif      
+      }
+        
     }
     
   }  
+  else {
+    modem_availible = false;
+#ifdef INT_BLINK_LED
+    blink_sequence("0100");
+#endif
+#ifdef EXT_BLINK_LED
+    blink_sequence_red("0100");
+#endif      
+  }
 #endif
 /*
 #ifdef DEBUG
@@ -1244,6 +1290,26 @@ void arduino_wake_up() {
   power_all_enable();       //enable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
   delay(5);                 //to settle down the ADC and peripheries
 }
+
+void calibrate_watchdog() {
+  unsigned long start_time;
+  unsigned long end_time;
+
+  watchdog_counter = 0;     //reset watchdog_counter
+  start_time = millis();
+  setup_watchdog(WDTO_2S); // Включаем строжевого пса
+  while (watchdog_counter < 4) 
+  {
+//    arduino_sleep();
+  }
+  wdt_disable(); // Выключим строжевого пса
+  end_time = millis();
+  wdto_2s_ms = (end_time - start_time) / 4;
+#ifdef DEBUG
+  Serial.println("WDT_2S=");
+  Serial.println(wdto_2s_ms);
+#endif
+}
 #endif
 
 void loop() {
@@ -1303,6 +1369,11 @@ void loop() {
   if (get_packet ())
   {
     print_packet ();
+/*    
+    if (gsm_error_count > 3) {
+      resetFunc();
+    }
+*/    
   }
 #ifdef GSM_MODEM
   if (gsm_availible) {
