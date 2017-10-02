@@ -635,7 +635,7 @@ void send_sms(char *phone, char *cmd, char *data) {
     delay(GSM_DELAY);
     mySerial.print(data);
     delay(GSM_DELAY);
-    gsm_command("\x01A","OK",20);
+    gsm_command("\x1A","OK",20);
   }
 }
 
@@ -1119,6 +1119,7 @@ boolean get_packet (void) {
   for (nChannel = 0; nChannel < NUM_CHANNELS; nChannel++)
   {
     if (WaitForPacket (waitTimes[nChannel], nChannel)) {
+      sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
       nRet = true;
       break;
     }
