@@ -6,7 +6,7 @@
 //#define INT_BLINK_LED
 #define EXT_BLINK_LED
 #define MODEM_SLEEP_DTR
-//#define CC2500_LEN_CONTROL
+#define CC2500_LEN_CONTROL
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
@@ -28,7 +28,6 @@
   #define RX_PIN   6            // Rx контакт для последовательного порта
   #define RED_LED_PIN 4
   #define YELLOW_LED_PIN 5
-  #define LEN_PIN    A1            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
 #else
   #define GDO0_PIN 3            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
   #define DTR_PIN  2            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
@@ -39,8 +38,8 @@
     #define RED_LED_PIN 5
     #define YELLOW_LED_PIN 4
   #endif
-  #define LEN_PIN    A1            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
 #endif
+#define LEN_PIN    A1            // Цифровой канал, к которму подключен контакт LEN (усилитель слабого сигнала) платы CC2500
 
 
 #define NUM_CHANNELS (4)      // Кол-во проверяемых каналов
@@ -636,7 +635,7 @@ void send_sms(char *phone, char *cmd, char *data) {
     delay(GSM_DELAY);
     mySerial.print(data);
     delay(GSM_DELAY);
-    gsm_command("\x01A","OK",20);
+    gsm_command("\x1A","OK",20);
   }
 }
 
@@ -1120,6 +1119,7 @@ boolean get_packet (void) {
   for (nChannel = 0; nChannel < NUM_CHANNELS; nChannel++)
   {
     if (WaitForPacket (waitTimes[nChannel], nChannel)) {
+      sequential_missed_packets = 0; // Сбрасываем счетчик непойманных пакетов
       nRet = true;
       break;
     }
