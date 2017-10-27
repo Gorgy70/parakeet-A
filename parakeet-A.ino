@@ -558,6 +558,9 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
         }
       }  
       if (break_on_error && loop >= len_error && strncmp(ERROR_STR,&SerialBuffer[loop-len_error],len_error) == 0) {
+#ifdef DEBUG
+        Serial.println("ERROR");
+#endif
         delay(GSM_DELAY);
         break;
       }
@@ -594,7 +597,7 @@ boolean gsm_command(const char *command, const char *response, int timeout, bool
 }
 
 boolean gsm_command(const char *command, const char *response, int timeout) {
-  gsm_command(command,response,timeout,true);
+  return gsm_command(command,response,timeout,true);
 }
 
 boolean set_gprs_profile() {
