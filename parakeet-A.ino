@@ -7,6 +7,7 @@
 #define EXT_BLINK_LED
 #define MODEM_SLEEP_DTR
 #define CC2500_LEN_CONTROL
+//#define NO_NEXT_TIME // Не пытаемся угадать время следующего пакета
 
 #include <SPI.h>
 #include <SoftwareSerial.h>
@@ -1149,7 +1150,7 @@ boolean get_packet (void) {
     Serial.print("Missed-");
     Serial.println(sequential_missed_packets);
 #endif
-    if (sequential_missed_packets > misses_until_failure && next_time > 0) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
+    if (sequential_missed_packets >= misses_until_failure && next_time > 0) { // Кол-во непойманных пакетов превысило заданное кол-во. Будем ловить пакеты непрерывно
 #ifdef ARDUINO_SLEEP
       calibrate_watchdog();
 #endif
@@ -1365,6 +1366,9 @@ void loop() {
 #endif
       watchdog_counter = 0;     //reset watchdog_counter
       watchdog_counter_max = ((next_time - current_time - 2000) / wdto_2s_ms); // Будем включаться за 2 секунды + остаток таймера до пакета
+#ifdef NO_NEXT_TIME      
+      watchdog_counter_max--;
+#endif
       next_time -= wdto_2s_ms*watchdog_counter_max;
       power_all_disable();                 //disable all peripheries (timer0, timer1, Universal Serial Interface, ADC)
       setup_watchdog(WDTO_2S); // Включаем строжевого пса
@@ -1395,6 +1399,9 @@ void loop() {
       next_time = 0;
     }
   }
+#ifdef NO_NEXT_TIME
+  next_time = 0;
+#endif
   if (get_packet ())
   {
     print_packet ();
