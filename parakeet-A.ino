@@ -238,7 +238,7 @@ void blink_sequence_red(const char *sequence) {
     digitalWrite(RED_LED_PIN, HIGH);
     switch (sequence[i]) {
       case '0': 
-        delay(500);
+        delay(200);
         break;
       case '1': 
         delay(1000);
