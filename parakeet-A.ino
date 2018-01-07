@@ -1,4 +1,5 @@
 #define NEW_PCB
+#define NEW_PCB_V3
 //#define DEBUG
 #define GSM_MODEM
 #define ARDUINO_SLEEP
@@ -23,7 +24,11 @@
 #endif
 
 #ifdef NEW_PCB
+#ifdef NEW_PCB_V3
+  #define GDO0_PIN A2           // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#else
   #define GDO0_PIN 9            // Цифровой канал, к которму подключен контакт GD0 платы CC2500
+#endif
   #define DTR_PIN  8            // Цифровой канал, к которму подключен контакт DTR платы GSM-модема
   #define TX_PIN   7            // Tx контакт для последовательного порта
   #define RX_PIN   6            // Rx контакт для последовательного порта
@@ -238,7 +243,7 @@ void blink_sequence_red(const char *sequence) {
     digitalWrite(RED_LED_PIN, HIGH);
     switch (sequence[i]) {
       case '0': 
-        delay(200);
+        delay(500);
         break;
       case '1': 
         delay(1000);
@@ -679,6 +684,7 @@ void read_sms() {
   boolean ret;
   byte i;
   boolean reboot = false;
+  boolean new_apn = false;
   char phone_number[15];
   char ascii_trans_id[6];
 
@@ -690,15 +696,16 @@ void read_sms() {
     if (strncmp("APN ",&gsm_cmd[i],4) == 0) {
       set_settings(settings.gsm_apn,gsm_cmd,i+4,32);
       saveSettingsToFlash();
-      set_gprs_profile();      
       extract_phone_number(phone_number,gsm_cmd,i);
       send_sms(phone_number,"APN:",settings.gsm_apn);
+      new_apn = true;
     }
     if (strncmp("DEFAULTS",&gsm_cmd[i],8) == 0) {
       clearSettings();
       saveSettingsToFlash();
       extract_phone_number(phone_number,gsm_cmd,i);
       send_sms(phone_number,"DEFAULTS:","OK");
+      new_apn = true;
     }
     if (strncmp("TRANSMIT ",&SerialBuffer[i],9) == 0) {
       set_settings(transmitter_id,gsm_cmd,i+9,6);
@@ -738,6 +745,7 @@ void read_sms() {
   gsm_command("AT+CMGDA=\"DEL READ\"","OK",5); // Удалить прочитанные смс-ки
   delay(GSM_DELAY);
   gsm_command("AT+CMGDA=\"DEL SENT\"","OK",5); // Удалить отправленные смс-ки
+  if (new_apn) set_gprs_profile();      
   if (reboot) resetFunc();
 }
 
